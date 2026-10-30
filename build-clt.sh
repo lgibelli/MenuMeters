@@ -5,22 +5,27 @@
 #
 # Changes:
 # 2026-10     gonejack: written.
-# 2026-10-30  Luca Gibelli: Sparkle, hardened runtime, Developer ID signing.
+# 2026-10-30  Luca Gibelli: Sparkle, hardened runtime, Developer ID signing,
+#             parallel architecture builds, --dev.
 #
 # Build MenuMeters with the Command Line Tools only (no Xcode installation).
 #
-#   ./build-clt.sh
+#   ./build-clt.sh          release build: universal, optimized
+#   ./build-clt.sh --dev    development build: this Mac's architecture only,
+#                           unoptimized, with debug info, signed ad hoc
 #
-# Produces a complete, signed universal application bundle:
+# Either way it produces a complete, signed application bundle:
 #
 #   out/MenuMeters.app
 #
-# The bundle contains the Swift executable (arm64 + x86_64), the Sparkle
-# update framework, the localized string tables, the disk icon sets, the About
-# text and the license notices. Run it with `open out/MenuMeters.app`.
+# The bundle contains the Swift executable (arm64 + x86_64, or only the native
+# architecture for --dev), the Sparkle update framework, the localized string
+# tables, the disk icon sets, the About text and the license notices. Run it
+# with `open out/MenuMeters.app`.
 #
-# It is signed with the Developer ID Application identity for TEAM_ID when one
-# is available (see release.env.example), and ad hoc otherwise. Either way it
+# A release build is signed with the Developer ID Application identity for
+# TEAM_ID when one is available (see release.env.example), and ad hoc
+# otherwise; a --dev build is always signed ad hoc. Either way it
 # gets the hardened runtime. The first build downloads Sparkle once into
 # build/vendor and checks it against a pinned SHA-256.
 #
@@ -28,13 +33,34 @@ set -euo pipefail
 source "$(dirname "$0")/Scripts/build-common.sh"
 cd "$PROJECT_ROOT"
 
+DEV=0
+[ $# -le 1 ] || die "usage: $0 [--dev]"
+case "${1:-}" in
+    "") ;;
+    --dev) DEV=1 ;;
+    *) die "usage: $0 [--dev]" ;;
+esac
+
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 OUT=out
 APP="$OUT/MenuMeters.app"
 OBJ="$OUT/obj"
 RES="$APP/Contents/Resources"
 DEPLOYMENT_TARGET=26.0
-IDENTITY="$(signing_identity)"
+CORES=$(sysctl -n hw.ncpu)
+if [ "$DEV" = 1 ]; then
+    IDENTITY="-"
+    # The machine's architecture, not the shell's: under Rosetta, uname -m
+    # says x86_64 on Apple silicon too.
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
+        ARCHS=(arm64)
+    else
+        ARCHS=(x86_64)
+    fi
+else
+    IDENTITY="$(signing_identity)"
+    ARCHS=(arm64 x86_64)
+fi
 SPARKLE="$(fetch_sparkle)"
 
 rm -rf "$OUT"
@@ -45,22 +71,45 @@ COMMON_FLAGS=(
     -sdk "$SDK"
     -module-name MenuMeters
     -swift-version 5
-    -O -whole-module-optimization
     -F "$SPARKLE" -framework Sparkle
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks
 )
+if [ "$DEV" = 1 ]; then
+    # Without whole-module optimization the driver compiles the files as
+    # separate jobs, CORES at a time.
+    COMMON_FLAGS+=(-Onone -g -j "$CORES")
+else
+    # The two architectures compile at the same time, and each splits its code
+    # generation across threads, as Xcode does for whole-module builds.
+    COMMON_FLAGS+=(-O -whole-module-optimization -num-threads $(( (CORES + 1) / 2 )))
+fi
 
-for arch in arm64 x86_64; do
+PIDS=()
+THIN=()
+for arch in "${ARCHS[@]}"; do
     say "Compiling $arch"
     xcrun swiftc "${COMMON_FLAGS[@]}" \
         -target "$arch-apple-macos$DEPLOYMENT_TARGET" \
         -o "$OBJ/MenuMeters-$arch" \
-        "${SOURCES[@]}"
+        "${SOURCES[@]}" &
+    PIDS+=("$!")
+    THIN+=("$OBJ/MenuMeters-$arch")
 done
+FAILED=0
+for pid in "${PIDS[@]}"; do
+    wait "$pid" || FAILED=1
+done
+[ "$FAILED" = 0 ] || die "compilation failed"
 
-lipo -create "$OBJ/MenuMeters-arm64" "$OBJ/MenuMeters-x86_64" \
-    -output "$APP/Contents/MacOS/MenuMeters"
+lipo -create "${THIN[@]}" -output "$APP/Contents/MacOS/MenuMeters"
 chmod +x "$APP/Contents/MacOS/MenuMeters"
+if [ "$DEV" = 1 ]; then
+    # Keep the debug symbols beside the app, where lldb looks for them.
+    DSYM="$OUT/MenuMeters.app.dSYM"
+    mv "$OBJ/MenuMeters-${ARCHS[0]}.dSYM" "$DSYM"
+    mv "$DSYM/Contents/Resources/DWARF/MenuMeters-${ARCHS[0]}" \
+        "$DSYM/Contents/Resources/DWARF/MenuMeters"
+fi
 rm -rf "$OBJ"
 
 # Info.plist is already a concrete, Xcode-variable-free plist.

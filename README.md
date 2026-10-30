@@ -78,6 +78,17 @@ first build downloads Sparkle 2.10.1 once into `build/vendor` and checks it
 against a pinned SHA-256. Run the app with `open out/MenuMeters.app` or copy it
 to `/Applications`.
 
+For day-to-day work, use a development build:
+
+```sh
+./build-clt.sh --dev
+```
+
+It builds only this Mac's architecture, without optimization and with debug
+symbols (`out/MenuMeters.app.dSYM`), and always signs ad hoc, even when
+`release.env` is present. On an M1 it takes about 5 seconds, against about 15
+for the release build, which compiles both architectures at once.
+
 To update an existing installation, quit MenuMeters first and replace the
 whole bundle. Remove the old one before copying: `ditto` merges into an
 existing bundle, and files left over from an older version break its
