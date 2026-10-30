@@ -4,6 +4,30 @@
 //
 //  Griffin PowerMate LED support.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  PowerMate support based on sample code from Griffin Technology.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: turn the LED off and close the device on release.
+//
 
 import Cocoa
 import IOKit
@@ -80,7 +104,14 @@ final class PowerMate {
 
     deinit {
         rampTimer?.invalidate()
-        if let deviceInterface { _ = deviceInterface.pointee.Release(deviceInterface) }
+        // The LED keeps its last state after we let go; leave it dark rather
+        // than glowing or pulsing.
+        stopPulse()
+        setGlow(0)
+        if let deviceInterface {
+            _ = deviceInterface.pointee.USBDeviceClose(deviceInterface)
+            _ = deviceInterface.pointee.Release(deviceInterface)
+        }
         if matchedIterator != 0 { IOObjectRelease(matchedIterator) }
         if terminatedIterator != 0 { IOObjectRelease(terminatedIterator) }
         if let notifySource {

@@ -4,6 +4,30 @@
 //
 //  CPU description, load ticks and task statistics.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Number formatting based on code contributed by Mike Fischer.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: fixed the cpu_ticks state indexes, so load no longer reads ~100%.
+//
 
 import Cocoa
 import IOKit
@@ -165,10 +189,12 @@ final class CPUStats {
         for index in 0..<count {
             let current = ticks[index]
             let prior = priorTicks[index]
-            let system = UInt64(current.cpu_ticks.0 &- prior.cpu_ticks.0)
-            let user = UInt64(current.cpu_ticks.1 &- prior.cpu_ticks.1)
-                + UInt64(current.cpu_ticks.2 &- prior.cpu_ticks.2)
-            let idle = UInt64(current.cpu_ticks.3 &- prior.cpu_ticks.3)
+            // cpu_ticks is indexed by CPU_STATE_USER (0), CPU_STATE_SYSTEM (1),
+            // CPU_STATE_IDLE (2) and CPU_STATE_NICE (3); nice time counts as user.
+            let user = UInt64(current.cpu_ticks.0 &- prior.cpu_ticks.0)
+                + UInt64(current.cpu_ticks.3 &- prior.cpu_ticks.3)
+            let system = UInt64(current.cpu_ticks.1 &- prior.cpu_ticks.1)
+            let idle = UInt64(current.cpu_ticks.2 &- prior.cpu_ticks.2)
             let total = system + user + idle
             let normalize = total < 1 ? 1.0 : 1.0 / Double(total)
             loads.append(CPULoadSample(system: Double(system) * normalize,

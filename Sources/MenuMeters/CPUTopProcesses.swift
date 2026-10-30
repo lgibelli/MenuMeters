@@ -4,9 +4,31 @@
 //
 //  Snapshot of the most CPU-intensive processes.
 //
+//  Copyright (c) 2018 Hofi
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: list every user's processes via /bin/ps, sampled off the main thread.
+//
 
 import Cocoa
-import Darwin
 
 struct ProcessListItem {
     let pid: pid_t
@@ -14,47 +36,34 @@ struct ProcessListItem {
     let cpuPercent: Double
 }
 
-private struct ProcessSample {
-    let pid: pid_t
-    let cpuTime: UInt64
-    let name: String
-}
-
 final class CPUTopProcesses {
+    /// Called on the main thread after each new snapshot is published.
+    var onUpdate: (() -> Void)?
+
+    private let queue = DispatchQueue(label: "MenuMeters.CPUTopProcesses", qos: .utility)
+    // Main thread only.
     private var processes: [ProcessListItem] = []
+    private var sampling = false
 
+    /// Samples in the background and publishes the result on the main thread.
+    /// Call on the main thread; a call while a sample is running is ignored.
     func startUpdateProcessList() {
-        let first = Self.collectSamples()
-        let start = mach_absolute_time()
-        usleep(100 * 1000)
-        let end = mach_absolute_time()
-        let second = Self.collectSamples()
-
-        guard !first.isEmpty, !second.isEmpty, end > start else { return }
-        let wall = Double(end - start)
-
-        var previous: [pid_t: UInt64] = [:]
-        previous.reserveCapacity(first.count)
-        for sample in first { previous[sample.pid] = sample.cpuTime }
-
-        let entries = second.map { sample -> ProcessListItem in
-            var percent = 0.0
-            if let old = previous[sample.pid], sample.cpuTime >= old {
-                percent = Double(sample.cpuTime - old) / wall * 100
+        guard !sampling else { return }
+        sampling = true
+        queue.async { [weak self] in
+            let entries = Self.sampleProcesses()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.sampling = false
+                guard let entries else { return }
+                self.processes = entries
+                self.onUpdate?()
             }
-            return ProcessListItem(pid: sample.pid,
-                                   name: Self.normalizedCommand(sample.name),
-                                   cpuPercent: percent)
-        }.sorted {
-            if $0.cpuPercent != $1.cpuPercent { return $0.cpuPercent > $1.cpuPercent }
-            return $0.name.localizedCompare($1.name) == .orderedAscending
         }
-
-        processes = entries
     }
 
     func stopUpdateProcessList() {
-        // Sampling is synchronous; keep the last result for the visible menu.
+        // Each sample is a single ps run; keep the last result for the next open.
     }
 
     func runningProcesses(byCPUUsage maximum: Int) -> [ProcessListItem] {
@@ -63,48 +72,53 @@ final class CPUTopProcesses {
 
     // MARK: - Sampling
 
-    private static func collectSamples() -> [ProcessSample] {
-        let capacity = proc_listallpids(nil, 0)
-        guard capacity > 0 else { return [] }
-
-        var pids = [pid_t](repeating: 0, count: Int(capacity))
-        let count = pids.withUnsafeMutableBytes {
-            proc_listallpids($0.baseAddress, Int32($0.count))
+    /// Runs the setuid `/bin/ps` (no shell): libproc cannot read the CPU time
+    /// of other users' and root's processes, which are often the busiest.
+    /// `pcpu` is the kernel's decaying average of recent usage, so one run is
+    /// a complete sample.
+    private static func sampleProcesses() -> [ProcessListItem]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        // -ww: never cut names to a terminal width; -c: executable name only.
+        process.arguments = ["-ww", "-A", "-c", "-o", "pid=,pcpu=,comm="]
+        process.environment = ["LC_ALL": "C"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            NSLog("MenuMeters: unable to run ps: %@", error.localizedDescription)
+            return nil
         }
-        guard count > 0 else { return [] }
-
-        var samples: [ProcessSample] = []
-        samples.reserveCapacity(Int(count))
-        for index in 0..<Int(count) {
-            let pid = pids[index]
-            guard pid > 0 else { continue }
-
-            var taskInfo = proc_taskinfo()
-            let taskInfoSize = MemoryLayout<proc_taskinfo>.size
-            guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &taskInfo, Int32(taskInfoSize)) == taskInfoSize else {
-                continue
-            }
-
-            var bsdInfo = proc_bsdinfo()
-            let bsdInfoSize = MemoryLayout<proc_bsdinfo>.size
-            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdInfo, Int32(bsdInfoSize)) == bsdInfoSize else {
-                continue
-            }
-
-            let name = withUnsafeBytes(of: bsdInfo.pbi_name) { raw -> String in
-                guard let base = raw.baseAddress else { return "" }
-                return String(cString: base.assumingMemoryBound(to: CChar.self))
-            }
-            let command = withUnsafeBytes(of: bsdInfo.pbi_comm) { raw -> String in
-                guard let base = raw.baseAddress else { return "" }
-                return String(cString: base.assumingMemoryBound(to: CChar.self))
-            }
-
-            samples.append(ProcessSample(pid: pid,
-                                         cpuTime: taskInfo.pti_total_user + taskInfo.pti_total_system,
-                                         name: name.isEmpty ? command : name))
+        // Terminating a stuck ps closes its end of the pipe, which ends the
+        // read below.
+        let timeout = DispatchWorkItem {
+            if process.isRunning { process.terminate() }
         }
-        return samples
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2, execute: timeout)
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        timeout.cancel()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else { return nil }
+
+        // Bounded UTF-8 conversion: the length comes from the pipe, and
+        // malformed names are repaired rather than trusted.
+        let output = String(decoding: data, as: UTF8.self)
+        var entries: [ProcessListItem] = []
+        for line in output.split(separator: "\n") {
+            // "  461  31.2 WindowServer": the name is last and may contain spaces.
+            let fields = line.split(separator: " ", maxSplits: 2)
+            guard fields.count == 3, let pid = pid_t(fields[0]), let percent = Double(fields[1]),
+                  pid != process.processIdentifier else { continue }
+            entries.append(ProcessListItem(pid: pid,
+                                           name: normalizedCommand(String(fields[2])),
+                                           cpuPercent: percent))
+        }
+        return entries.sorted {
+            if $0.cpuPercent != $1.cpuPercent { return $0.cpuPercent > $1.cpuPercent }
+            return $0.name.localizedCompare($1.name) == .orderedAscending
+        }
     }
 
     private static func normalizedCommand(_ name: String) -> String {
