@@ -292,6 +292,11 @@ final class DiskExtra: MenuExtraBase {
                                     message: error.localizedDescription)
             return
         }
+        // Stop a diskutil that hangs. Its exit ends the read below, and the
+        // completion there reports the failure and clears ejectTasks.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 120) {
+            if task.isRunning { task.terminate() }
+        }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             // Reading while diskutil runs keeps a full pipe from blocking it;
             // the read ends when it exits.

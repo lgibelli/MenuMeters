@@ -86,6 +86,8 @@ final class NetConfig {
     private var cachedServiceSpeed: [String: Double] = [:]
     private var cachedUnderlying: [String: String] = [:]
     private var cachedInterfaceUp: [String: Bool] = [:]
+    // When to ask again about a PPP service whose status could not be read.
+    private var pppRetryAfter: [String: Date] = [:]
 
     // ifconfig link speeds by interface name, looked up off the main thread.
     // Configuration changes mark them stale, and a stale speed is still
@@ -171,10 +173,18 @@ final class NetConfig {
     func interfaceDetails() -> [NetInterfaceDetails] {
         if let cached = cachedDetails {
             var refreshed = cached
-            // Includes services whose status could not be read last time.
+            // Includes services whose status could not be read before, but
+            // asks about those at most every 10 seconds: if pppconfd stops
+            // answering, each request waits for its timeout on the main thread.
             for index in refreshed.indices where refreshed[index].isPPPService {
-                if let status = ppp.status(forServiceID: refreshed[index].serviceID) {
+                let serviceID = refreshed[index].serviceID
+                let unknown = refreshed[index].pppStatus == nil
+                if unknown, let retry = pppRetryAfter[serviceID], retry > Date() { continue }
+                if let status = ppp.status(forServiceID: serviceID) {
                     refreshed[index].pppStatus = status
+                    pppRetryAfter[serviceID] = nil
+                } else if unknown {
+                    pppRetryAfter[serviceID] = Date().addingTimeInterval(10)
                 }
             }
             cachedDetails = refreshed

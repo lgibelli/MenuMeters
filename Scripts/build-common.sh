@@ -137,12 +137,10 @@ SPARKLE_VENDOR="$PROJECT_ROOT/build/vendor/sparkle-$SPARKLE_VERSION"
 fetch_sparkle() {
   if [ ! -d "$SPARKLE_VENDOR/Sparkle.framework" ]; then
     local tarball="$PROJECT_ROOT/build/vendor/Sparkle-$SPARKLE_VERSION.tar.xz"
-    # Unpack beside the final directory and move it into place only once
-    # complete, so an interrupted run cannot leave a partial framework that
-    # the next run would take for a finished one.
-    local stage="$SPARKLE_VENDOR.partial"
-    rm -rf "$stage"
-    mkdir -p "$stage"
+    # Unpack beside the final directory, in a directory of this run's own,
+    # and move it into place only once complete, so an interrupted or
+    # concurrent run cannot leave a partial framework behind.
+    mkdir -p "$PROJECT_ROOT/build/vendor"
     if [ ! -f "$tarball" ]; then
       curl -sSL --fail -o "$tarball" \
         "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" \
@@ -153,13 +151,19 @@ fetch_sparkle() {
     [ "$got" = "$SPARKLE_SHA256" ] || die "Sparkle $SPARKLE_VERSION tarball has the wrong hash.
        expected $SPARKLE_SHA256
        got      $got"
+    local stage
+    stage=$(mktemp -d "$SPARKLE_VENDOR.partial.XXXXXX")
     # Only what we ship or run. The distribution also carries a test app,
     # which LaunchServices would register as an application.
     tar -xf "$tarball" -C "$stage" \
         ./Sparkle.framework ./bin ./LICENSE \
         || { rm -rf "$stage"; die "could not unpack $tarball"; }
-    rm -rf "$SPARKLE_VENDOR"
-    mv "$stage" "$SPARKLE_VENDOR"
+    if [ -d "$SPARKLE_VENDOR/Sparkle.framework" ]; then
+      rm -rf "$stage"    # another run finished first
+    else
+      rm -rf "$SPARKLE_VENDOR"
+      mv "$stage" "$SPARKLE_VENDOR"
+    fi
   fi
   echo "$SPARKLE_VENDOR"
 }
