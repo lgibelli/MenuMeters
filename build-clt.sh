@@ -34,6 +34,7 @@ source "$(dirname "$0")/Scripts/build-common.sh"
 cd "$PROJECT_ROOT"
 
 DEV=0
+[ $# -le 1 ] || die "usage: $0 [--dev]"
 case "${1:-}" in
     "") ;;
     --dev) DEV=1 ;;
@@ -49,7 +50,13 @@ DEPLOYMENT_TARGET=26.0
 CORES=$(sysctl -n hw.ncpu)
 if [ "$DEV" = 1 ]; then
     IDENTITY="-"
-    ARCHS=("$(uname -m)")
+    # The machine's architecture, not the shell's: under Rosetta, uname -m
+    # says x86_64 on Apple silicon too.
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
+        ARCHS=(arm64)
+    else
+        ARCHS=(x86_64)
+    fi
 else
     IDENTITY="$(signing_identity)"
     ARCHS=(arm64 x86_64)
