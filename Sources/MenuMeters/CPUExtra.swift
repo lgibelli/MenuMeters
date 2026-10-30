@@ -4,6 +4,29 @@
 //
 //  CPU menu bar meter.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: live process rows, horizontal thermometer layout, PowerMate teardown.
+//
 
 import Cocoa
 
@@ -24,6 +47,9 @@ final class CPUExtra: MenuExtraBase {
     override init(bundleID: String) {
         super.init(bundleID: bundleID)
         buildMenu()
+        topProcesses.onUpdate = { [weak self] in self?.updateMenuWhenDown() }
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationWillTerminate(_:)),
+                                               name: NSApplication.willTerminateNotification, object: nil)
         configFromPrefs(nil)
     }
 
@@ -110,6 +136,8 @@ final class CPUExtra: MenuExtraBase {
 
     override func menuWillOpen(_ menu: NSMenu) {
         if Prefs.shared.cpuMaxProcessCount > 0 {
+            // AppKit has already built the rows from the previous snapshot;
+            // the new one replaces them in place when it arrives.
             topProcesses.startUpdateProcessList()
         }
         super.menuWillOpen(menu)
@@ -118,6 +146,13 @@ final class CPUExtra: MenuExtraBase {
     override func menuDidClose(_ menu: NSMenu) {
         topProcesses.stopUpdateProcessList()
         super.menuDidClose(menu)
+    }
+
+    /// Live-updates the items of the open menu.
+    private func updateMenuWhenDown() {
+        guard isMenuVisible else { return }
+        _ = menu()
+        forceMenuRedraw(extraMenu)
     }
 
     @objc private func openConsole(_ sender: Any?) {
@@ -174,7 +209,9 @@ final class CPUExtra: MenuExtraBase {
 
     private func configurePowerMate() {
         let prefs = Prefs.shared
-        guard prefs.cpuPowerMate else {
+        // The meter's timer drives the LED, so hold the device only while the
+        // meter runs. Releasing it turns the LED off.
+        guard prefs.cpuPowerMate, statusItem != nil else {
             powerMate = nil
             return
         }
@@ -199,6 +236,19 @@ final class CPUExtra: MenuExtraBase {
             powerMate.setGlow(1)
             powerMate.setPulse(1)
         }
+    }
+
+    override func removeStatusItem() {
+        super.removeStatusItem()
+        // Also reached when the user drags the meter out of the menu bar,
+        // which does not go through configFromPrefs.
+        powerMate = nil
+    }
+
+    @objc private func applicationWillTerminate(_ notification: Notification) {
+        // Nothing is deallocated at exit; release the PowerMate so its LED
+        // does not keep glowing or pulsing after we quit.
+        powerMate = nil
     }
 
     override func setupColor() {
@@ -228,10 +278,15 @@ final class CPUExtra: MenuExtraBase {
     // MARK: - Timer
 
     override func timerFired(_ timer: Timer) {
-        let current = cpuInfo.currentLoad(sorted: Prefs.shared.cpuSortByUsage)
+        let prefs = Prefs.shared
+        // Keep the process list live while the menu is open.
+        if isMenuVisible, prefs.cpuMaxProcessCount > 0 {
+            topProcesses.startUpdateProcessList()
+        }
+
+        let current = cpuInfo.currentLoad(sorted: prefs.cpuSortByUsage)
         guard !current.isEmpty else { return }
 
-        let prefs = Prefs.shared
         if prefs.cpuDisplayMode & CPU.displayGraph != 0 {
             if loadHistory.count >= prefs.cpuGraphLength {
                 loadHistory.removeFirst(loadHistory.count - prefs.cpuGraphLength + 1)
@@ -242,8 +297,7 @@ final class CPUExtra: MenuExtraBase {
         loadHistory.append(current)
 
         if isMenuVisible {
-            _ = menu()
-            forceMenuRedraw(extraMenu)
+            updateMenuWhenDown()
         }
         if prefs.cpuPowerMate, let powerMate {
             updatePowerMate(powerMate)
@@ -299,19 +353,21 @@ final class CPUExtra: MenuExtraBase {
 
         if prefs.cpuDisplayMode & CPU.displayHorizontalThermometer != 0 {
             let rows = max(1, prefs.cpuHorizontalRows)
-            let columns = (Int(cpuCount) + rows - 1) / rows
-            let columnWidth = (menuWidth - 1) / CGFloat(columns)
+            // Lay out by displayed bar, not by CPU index, so that with a
+            // stride of 2 the bars still fill every row.
+            let displayCount = (Int(cpuCount) + Int(stride) - 1) / Int(stride)
+            let columns = (displayCount + rows - 1) / rows
+            // menuWidth also covers the temperature drawn before renderOffset.
+            let columnWidth = (menuWidth - renderOffset - 1) / CGFloat(columns)
             let height = imageHeight()
             let thermometerHeight = (height - 2) / CGFloat(rows)
-            var cpu = 0
-            while cpu < Int(cpuCount) {
-                let column = CGFloat(cpu / rows)
-                let row = CGFloat(cpu % rows + 1)
+            for display in 0..<displayCount {
+                let column = CGFloat(display / rows)
+                let row = CGFloat(display % rows + 1)
                 let x = renderOffset + column * columnWidth + 1
                 let y = height - row * thermometerHeight - 1
-                renderHorizontalThermometer(processor: UInt32(cpu), x: x, y: y,
+                renderHorizontalThermometer(processor: UInt32(display * Int(stride)), x: x, y: y,
                                             width: columnWidth, height: thermometerHeight)
-                cpu += Int(stride)
             }
         } else {
             var cpu = 0
@@ -481,7 +537,8 @@ final class CPUExtra: MenuExtraBase {
     private func renderHorizontalThermometer(processor: UInt32, x: CGFloat, y: CGFloat,
                                              width: CGFloat, height: CGFloat) {
         let value = load(for: processor, at: -1)
-        guard value.system >= 0, value.user >= 0 else { return }
+        // With too many bars for the width there is no room inside the frame.
+        guard value.system >= 0, value.user >= 0, width > 2 else { return }
 
         let capRect = NSRect(x: x + width - 2, y: y, width: 1, height: height - 1)
         let userRect = NSRect(x: x + 1, y: y, width: (width - 2) * min(1, value.user + value.system),

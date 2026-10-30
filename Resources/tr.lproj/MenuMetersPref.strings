@@ -105,3 +105,10 @@
 "Activity monitor:" = "Etkinlik Monitörü:";
 "Opens specific panes" = "Belirli panoları açar";
 "pure black/white" = "saf siyah/beyaz";
+
+/* Startup and updates */
+"Startup:" = "Başlangıç:";
+"Launch MenuMeters at login" = "Oturum açıldığında MenuMeters’ı aç";
+"Updates:" = "Güncellemeler:";
+"Check for updates automatically" = "Güncellemeleri otomatik olarak denetle";
+"Check Now" = "Şimdi Denetle";

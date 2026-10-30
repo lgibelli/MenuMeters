@@ -4,6 +4,30 @@
 //
 //  SystemConfiguration and IOKit reader for network service details.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Interface up detection based on a patch contributed by Da Woon Jung.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: ifconfig link speed without a shell, off the main thread; PPP up state not cached when unknown.
+//
 
 import Cocoa
 import SystemConfiguration
@@ -24,6 +48,7 @@ struct NetInterfaceDetails {
     var deviceName: String?
     var pppDeviceName: String?
     var connectionType: String?
+    var isPPPService = false
     var pppStatus: PPPStatusResult?
     var ipv4Addresses: [String] = []
     var ipv6Addresses: [String] = []
@@ -61,6 +86,17 @@ final class NetConfig {
     private var cachedServiceSpeed: [String: Double] = [:]
     private var cachedUnderlying: [String: String] = [:]
     private var cachedInterfaceUp: [String: Bool] = [:]
+    // When to ask again about a PPP service whose status could not be read.
+    private var pppRetryAfter: [String: Date] = [:]
+
+    // ifconfig link speeds by interface name, looked up off the main thread.
+    // Configuration changes mark them stale, and a stale speed is still
+    // served until its refresh completes.
+    private var ifconfigSpeeds: [String: Double] = [:]
+    private var staleIfconfigSpeeds: Set<String> = []
+    private var ifconfigLookupsInFlight: Set<String> = []
+    // Bumped by clearCaches(), to recognize lookups started before a change.
+    private var ifconfigGeneration = 0
 
     init() {
         var context = SCDynamicStoreContext(version: 0,
@@ -137,9 +173,18 @@ final class NetConfig {
     func interfaceDetails() -> [NetInterfaceDetails] {
         if let cached = cachedDetails {
             var refreshed = cached
-            for index in refreshed.indices where refreshed[index].pppStatus != nil {
-                if let status = ppp.status(forServiceID: refreshed[index].serviceID) {
+            // Includes services whose status could not be read before, but
+            // asks about those at most every 10 seconds: if pppconfd stops
+            // answering, each request waits for its timeout on the main thread.
+            for index in refreshed.indices where refreshed[index].isPPPService {
+                let serviceID = refreshed[index].serviceID
+                let unknown = refreshed[index].pppStatus == nil
+                if unknown, let retry = pppRetryAfter[serviceID], retry > Date() { continue }
+                if let status = ppp.status(forServiceID: serviceID) {
                     refreshed[index].pppStatus = status
+                    pppRetryAfter[serviceID] = nil
+                } else if unknown {
+                    pppRetryAfter[serviceID] = Date().addingTimeInterval(10)
                 }
             }
             cachedDetails = refreshed
@@ -188,16 +233,17 @@ final class NetConfig {
                 detail.pppDeviceName = pppName
             }
             if sysconfigValue("Setup:/Network/Service/\(serviceID)/PPP") != nil {
+                detail.isPPPService = true
                 detail.pppStatus = ppp.status(forServiceID: serviceID)
             }
 
             if let ipDict = sysconfigValue("State:/Network/Service/\(serviceID)/IPv4") {
                 detail.ipv4Addresses = stringArray(ipDict["Addresses"])
             }
-            if let device = detail.deviceName {
-                if let ipDict = sysconfigValue("State:/Network/Interface/\(device)/IPv6") {
-                    detail.ipv6Addresses = stringArray(ipDict["Addresses"])
-                }
+            // The service's own addresses: the interface's would include its
+            // link-local address, and for PPP those of the transport.
+            if let ipDict = sysconfigValue("State:/Network/Service/\(serviceID)/IPv6") {
+                detail.ipv6Addresses = stringArray(ipDict["Addresses"])
             }
 
             if let device = detail.deviceName,
@@ -345,34 +391,44 @@ final class NetConfig {
                 return active
             }
         } else if interfaceName.hasPrefix("ppp") {
-            let running = ppp.status(forInterfaceName: interfaceName)?.status == NetPPP.running
-            cachedInterfaceUp[interfaceName] = running
-            return running
+            if let status = ppp.status(forInterfaceName: interfaceName) {
+                let running = status.status == NetPPP.running
+                cachedInterfaceUp[interfaceName] = running
+                return running
+            }
+            // pppconfd cannot report on it: ask the interface, without
+            // caching, so pppconfd is asked again next time.
+            return Self.interfaceIsUpAndRunning(interfaceName)
         }
 
         // Interfaces without explicit link state are assumed active.
         return true
     }
 
+    /// IFF_UP and IFF_RUNNING from the interface flags. False when there is no
+    /// such interface.
+    private static func interfaceIsUpAndRunning(_ interfaceName: String) -> Bool {
+        var addressList: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addressList) == 0 else { return false }
+        defer { freeifaddrs(addressList) }
+        var pointer = addressList
+        while let current = pointer {
+            let interface = current.pointee
+            pointer = interface.ifa_next
+            guard String(cString: interface.ifa_name) == interfaceName else { continue }
+            let wanted = UInt32(IFF_UP | IFF_RUNNING)
+            return interface.ifa_flags & wanted == wanted
+        }
+        return false
+    }
+
     // MARK: - Link speed
 
     func speedForInterfaceName(_ interfaceName: String) -> Double {
-        if sysconfigValue("Setup:/Network/Interface/\(interfaceName)/AirPort") != nil,
-           let airportSpeed = speedForAirport() {
-            return airportSpeed
-        }
         if let ioKitSpeed = speedForInterfaceNameViaIOKit(interfaceName) {
             return ioKitSpeed
         }
         return speedForInterfaceNameViaIfConfig(interfaceName)
-    }
-
-    private func speedForAirport() -> Double? {
-        let path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/A/Resources/airport"
-        guard let output = runCommand("\(path) -I | grep maxRate"),
-              let colon = output.range(of: ":") else { return nil }
-        let value = output[colon.upperBound...]
-        return firstNumber(String(value)).map { $0 * 1_000_000 }
     }
 
     private func speedForInterfaceNameViaIOKit(_ interfaceName: String) -> Double? {
@@ -399,55 +455,100 @@ final class NetConfig {
         return value.doubleValue
     }
 
+    /// Returns the last ifconfig speed for the interface, 0 (unknown) until
+    /// one is known, and starts a lookup when there is none or it is stale.
     private func speedForInterfaceNameViaIfConfig(_ interfaceName: String) -> Double {
-        guard let output = runCommand("ifconfig -v \(interfaceName) | egrep 'link rate|uplink'") else {
-            return 0
+        if ifconfigSpeeds[interfaceName] == nil || staleIfconfigSpeeds.contains(interfaceName) {
+            startIfconfigLookup(interfaceName)
         }
-        if output.contains("does not") { return 0 }
-
-        let text: String
-        if let separator = output.range(of: "/") {
-            text = String(output[separator.upperBound...])
-        } else if let separator = output.range(of: ": ") {
-            text = String(output[separator.upperBound...])
-        } else {
-            return 0
-        }
-
-        let factors: [(String, Double)] = [("Gbps", 1_000_000_000),
-                                           ("Mbps", 1_000_000),
-                                           ("Kbps", 1_000),
-                                           ("bps", 1)]
-        for (unit, factor) in factors {
-            if let range = text.range(of: unit) {
-                let number = firstNumber(String(text[..<range.lowerBound])) ?? 0
-                return number * factor
-            }
-        }
-        return 0
+        return ifconfigSpeeds[interfaceName] ?? 0
     }
 
-    // MARK: - Formatters
+    private func startIfconfigLookup(_ interfaceName: String) {
+        guard Self.isPlainInterfaceName(interfaceName),
+              !ifconfigLookupsInFlight.contains(interfaceName) else { return }
+        ifconfigLookupsInFlight.insert(interfaceName)
+        let generation = ifconfigGeneration
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let speed = Self.ifconfigLinkSpeed(interfaceName)
+            DispatchQueue.main.async {
+                self?.ifconfigLookupFinished(interfaceName, speed: speed, generation: generation)
+            }
+        }
+    }
 
-    private func runCommand(_ command: String) -> String? {
+    private func ifconfigLookupFinished(_ interfaceName: String, speed: Double, generation: Int) {
+        ifconfigLookupsInFlight.remove(interfaceName)
+        // A lookup started before the configuration changed is served for
+        // now, but stays stale so the next access looks again.
+        let current = generation == ifconfigGeneration
+        if current {
+            staleIfconfigSpeeds.remove(interfaceName)
+        } else {
+            staleIfconfigSpeeds.insert(interfaceName)
+        }
+        let changed = (ifconfigSpeeds.updateValue(speed, forKey: interfaceName) ?? 0) != speed
+        guard changed || !current else { return }
+        // Drop the caches derived from link speed and let the owner refresh.
+        cachedDetails = nil
+        cachedServiceSpeed.removeAll()
+        onChange?()
+    }
+
+    /// BSD names such as en0. Anything else is never handed to ifconfig.
+    private static func isPlainInterfaceName(_ interfaceName: String) -> Bool {
+        interfaceName.utf8.count < Int(IFNAMSIZ)
+            && interfaceName.range(of: "^[A-Za-z]+[0-9]+$", options: .regularExpression) != nil
+    }
+
+    /// Runs `/sbin/ifconfig -v <name>` (no shell), giving up after two seconds.
+    private static func ifconfigLinkSpeed(_ interfaceName: String) -> Double {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
+        process.executableURL = URL(fileURLWithPath: "/sbin/ifconfig")
+        process.arguments = ["-v", interfaceName]
+        process.environment = ["LC_ALL": "C"]
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = pipe
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
         } catch {
-            return nil
+            return 0
         }
+        // Terminating a stuck ifconfig closes its end of the pipe, which ends
+        // the read below.
+        let timeout = DispatchWorkItem {
+            if process.isRunning { process.terminate() }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2, execute: timeout)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return String(data: data, encoding: .utf8)
+        timeout.cancel()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else { return 0 }
+        return linkSpeed(fromIfconfigOutput: String(decoding: data, as: UTF8.self))
     }
 
-    private func firstNumber(_ text: String) -> Double? {
-        Scanner(string: text).scanDouble()
+    /// Parses the "link rate:" line of `ifconfig -v`, or the "uplink rate:"
+    /// and "downlink rate:" lines it prints instead when the effective rate
+    /// differs from the maximum. The largest rate found is the link speed.
+    private static func linkSpeed(fromIfconfigOutput output: String) -> Double {
+        let factors: [String: Double] = ["Gbps": 1_000_000_000,
+                                         "Mbps": 1_000_000,
+                                         "Kbps": 1_000,
+                                         "bps": 1]
+        var speed: Double = 0
+        for line in output.split(separator: "\n") {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let label = line[..<colon].trimmingCharacters(in: .whitespaces)
+            guard ["link rate", "uplink rate", "downlink rate"].contains(label) else { continue }
+            let words = line[line.index(after: colon)...].split(separator: " ")
+            for (number, unit) in zip(words, words.dropFirst()) {
+                if let value = Double(number), let factor = factors[String(unit)] {
+                    speed = max(speed, value * factor)
+                }
+            }
+        }
+        return speed
     }
 
     // MARK: - SystemConfiguration helpers
@@ -510,5 +611,7 @@ final class NetConfig {
         cachedServiceSpeed.removeAll()
         cachedUnderlying.removeAll()
         cachedInterfaceUp.removeAll()
+        ifconfigGeneration += 1
+        staleIfconfigSpeeds = Set(ifconfigSpeeds.keys)
     }
 }

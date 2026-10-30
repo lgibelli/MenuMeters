@@ -4,6 +4,33 @@
 //
 //  SMC (Intel) and IOHID (Apple silicon) temperature sensors.
 //
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  The SMC key-description lookup is modified from smcread.c in VirtualSMC,
+//  Copyright (c) 2017 vit9696, BSD-3-Clause.
+//  The Apple Silicon sensor access is based on fermion-star/apple_sensors, which
+//  is based on freedomtan/sensors, Copyright (c) 2016-2018 Koan-Sin Tan,
+//  BSD-3-Clause. See Docs/Acknowledgements.md for the license texts.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: matched the 80-byte SMC call layout and cached the default sensor.
+//
 
 import Cocoa
 import IOKit
@@ -20,17 +47,25 @@ enum TemperatureReader {
     }
 
     static func defaultSensor() -> String? {
+        if let resolvedDefaultSensor { return resolvedDefaultSensor }
         let candidate: String
 #if arch(x86_64)
         candidate = "TC0P"
 #else
         candidate = "SOC MTR Temp Sensor0"
 #endif
+        // Not cached: the sensors may become readable later.
         guard let names = sensorNames(), !names.isEmpty else { return candidate }
-        if names.contains(candidate) { return candidate }
-        if let tc = names.first(where: { $0.hasPrefix("TC") }) { return tc }
-        return names.first
+        let sensor = names.contains(candidate)
+            ? candidate
+            : names.first(where: { $0.hasPrefix("TC") }) ?? names.first
+        resolvedDefaultSensor = sensor
+        return sensor
     }
+
+    // Depends only on the hardware, so it is resolved from the first
+    // successful enumeration rather than by enumerating on each redraw.
+    private static var resolvedDefaultSensor: String?
 
     static func displayName(for sensor: String) -> String {
 #if arch(x86_64)
@@ -112,11 +147,15 @@ private enum IntelSMC {
         var b28: UInt8 = 0, b29: UInt8 = 0, b30: UInt8 = 0, b31: UInt8 = 0
     }
 
+    /// Mirrors the 80-byte C SMCParamStruct the AppleSMC user client expects.
     private struct KeyData {
         var key = Code()
         var vers = Version()
         var pLimitData = PLimitData()
         var keyInfo = KeyInfo()
+        // C pads the 9-byte keyInfo to 12 bytes; Swift does not, so pad by
+        // hand to put result at 40, data8 at 42, data32 at 44 and bytes at 48.
+        var padding: UInt16 = 0
         var result: UInt8 = 0
         var status: UInt8 = 0
         var data8: UInt8 = 0
@@ -149,6 +188,8 @@ private enum IntelSMC {
 
     private static func call(_ connection: io_connect_t, _ input: inout KeyData,
                              _ output: inout KeyData) -> kern_return_t {
+        // Never hand the kernel a struct that does not match its layout.
+        guard MemoryLayout<KeyData>.size == 80 else { return kIOReturnBadArgument }
         var size = MemoryLayout<KeyData>.size
         return withUnsafePointer(to: &input) { inputPointer in
             withUnsafeMutablePointer(to: &output) { outputPointer in

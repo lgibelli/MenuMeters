@@ -4,6 +4,30 @@
 //
 //  Memory menu bar meter.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Number formatting based on code contributed by Mike Fischer.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: fixed cache hit rate and pressure display; menu no longer advances samples.
+//
 
 import Cocoa
 
@@ -70,16 +94,19 @@ final class MemExtra: MenuExtraBase {
     }
 
     override func menu() -> NSMenu {
-        _ = refreshHistory()
         if let stats = memory.swapStats() {
             swapStats = stats
         }
-        updateMenuContent()
+        // Take a read-only snapshot: the paging baselines and the graph
+        // history advance only on the timer.
+        if let stats = memory.memSnapshot() ?? history.last {
+            updateMenuContent(stats)
+        }
         return extraMenu
     }
 
-    private func updateMenuContent() {
-        guard let stats = history.last, let swap = swapStats else { return }
+    private func updateMenuContent(_ stats: MemSample) {
+        guard let swap = swapStats else { return }
 
         let usage = String(format: L("%@ used, %@ free, %@ total"),
                            floatMB(stats.usedMB), floatMB(stats.freeMB), intMB(stats.totalMB))
@@ -101,7 +128,8 @@ final class MemExtra: MenuExtraBase {
                             integer(stats.pageIns), integer(stats.pageOuts))
         liveUpdateMenuItemTitle(extraMenu, Mem.pageInfoMenuIndex, paging)
 
-        let hitRate = stats.lookups == 0 ? 0 : Double(stats.hits) / Double(stats.lookups) * 100
+        // A fraction: the "%" in the formatter's pattern multiplies by 100.
+        let hitRate = stats.lookups == 0 ? 0 : Double(stats.hits) / Double(stats.lookups)
         let cache = String(format: L("%@ cache lookups, %@ cache hits (%@)"),
                            integer(stats.lookups), integer(stats.hits), percent(hitRate))
         liveUpdateMenuItemTitle(extraMenu, Mem.cacheInfoMenuIndex, cache)
@@ -138,6 +166,11 @@ final class MemExtra: MenuExtraBase {
     // MARK: - Preferences
 
     override func configFromPrefs(_ notification: Notification?) {
+        if statusItem == nil && Prefs.shared.meterEnabled(bundleID) {
+            // Sampling (re)starts below: move the paging baselines here so the
+            // first sample does not span the time the meter was off.
+            _ = memory.memStats()
+        }
         configDisplay(interval: Prefs.shared.memInterval)
         setupColor()
 
@@ -154,7 +187,7 @@ final class MemExtra: MenuExtraBase {
         case Mem.displayPie:
             menuWidth = Mem.pieWidth
         case Mem.displayNumber:
-            let total = UInt64(memory.memStats()?.totalMB ?? 0)
+            let total = UInt64(memory.memSnapshot()?.totalMB ?? 0)
             let base: CGFloat
             if total >= 10_000 {
                 base = Mem.numberExtraLongWidth
@@ -225,7 +258,9 @@ final class MemExtra: MenuExtraBase {
         if let stats = memory.swapStats() {
             swapStats = stats
         }
-        updateMenuContent()
+        if let stats = history.last {
+            updateMenuContent(stats)
+        }
         forceMenuRedraw(extraMenu)
     }
 
@@ -487,7 +522,7 @@ final class MemExtra: MenuExtraBase {
     }
 
     private func percent(_ value: Double) -> String {
-        percentFormatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f%%", value)
+        percentFormatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f%%", value * 100)
     }
 
     private func attributedLabel(_ text: String, color: NSColor) -> NSAttributedString {

@@ -105,3 +105,10 @@
 "Activity monitor:" = "Aktivitätsanzeige:";
 "Opens specific panes" = "Öffnet entsprechende Kategorien";
 "pure black/white" = "Schwarz-Weiß";
+
+/* Startup and updates */
+"Startup:" = "Start:";
+"Launch MenuMeters at login" = "MenuMeters bei der Anmeldung öffnen";
+"Updates:" = "Updates:";
+"Check for updates automatically" = "Automatisch nach Updates suchen";
+"Check Now" = "Jetzt suchen";

@@ -4,6 +4,29 @@
 //
 //  Network interface byte counters with per-interface deltas, peaks and totals.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: PPP links fall back to interface counters when pppconfd is unavailable.
+//
 
 import Foundation
 import Darwin
@@ -22,6 +45,9 @@ struct NetInterfaceStats {
 final class NetStats {
     private let ppp = NetPPP.shared
     private var lastData: [String: NetInterfaceStats] = [:]
+    // Whether each interface's last counters came from pppconfd rather than
+    // the interface. The two count from different origins.
+    private var lastFromPPP: [String: Bool] = [:]
 
     private struct InterfaceCounters {
         let name: String
@@ -39,27 +65,35 @@ final class NetStats {
         guard let interfaces = readInterfaces() else { return nil }
 
         var newData: [String: NetInterfaceStats] = [:]
+        var newFromPPP: [String: Bool] = [:]
         for interface in interfaces {
-            if interface.name.hasPrefix("ppp") {
-                guard let status = ppp.status(forInterfaceName: interface.name),
-                      status.status == NetPPP.running,
+            // PPP links use the pppconfd counters when it can report on them,
+            // and the interface counters like any other link otherwise.
+            if interface.name.hasPrefix("ppp"),
+               let status = ppp.status(forInterfaceName: interface.name) {
+                guard status.status == NetPPP.running,
                       let input = status.inBytes,
                       let output = status.outBytes else { continue }
                 newData[interface.name] = updatedStats(name: interface.name,
                                                        input: input,
                                                        output: output,
                                                        isUp: true,
+                                                       fromPPP: true,
                                                        interval: interval)
+                newFromPPP[interface.name] = true
             } else {
                 newData[interface.name] = updatedStats(name: interface.name,
                                                        input: interface.input,
                                                        output: interface.output,
                                                        isUp: interface.isUp,
+                                                       fromPPP: false,
                                                        interval: interval)
+                newFromPPP[interface.name] = false
             }
         }
 
         lastData = newData
+        lastFromPPP = newFromPPP
         return newData
     }
 
@@ -73,7 +107,8 @@ final class NetStats {
     // MARK: - Counter math
 
     private func updatedStats(name: String, input: UInt32, output: UInt32,
-                              isUp: Bool, interval: TimeInterval) -> NetInterfaceStats {
+                              isUp: Bool, fromPPP: Bool,
+                              interval: TimeInterval) -> NetInterfaceStats {
         guard let old = lastData[name], isUp else {
             return NetInterfaceStats(ifIn: input,
                                      ifOut: output,
@@ -82,6 +117,19 @@ final class NetStats {
                                      totalIn: UInt64(input),
                                      totalOut: UInt64(output),
                                      peak: 0,
+                                     hasDeltas: false)
+        }
+        guard lastFromPPP[name] == fromPPP else {
+            // The counters switched source. Comparing across sources would
+            // look like a wrap and add about 4 GB, so take the new counters
+            // as the baseline and keep the totals.
+            return NetInterfaceStats(ifIn: input,
+                                     ifOut: output,
+                                     deltaIn: 0,
+                                     deltaOut: 0,
+                                     totalIn: old.totalIn,
+                                     totalOut: old.totalOut,
+                                     peak: old.peak,
                                      hasDeltas: false)
         }
 

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -63,6 +63,10 @@
 		F0C56CE53007E5006948741B /* releases.html in Resources */ = {isa = PBXBuildFile; fileRef = DDCF90A88D17F5FB73DAAD79 /* releases.html */; };
 		F323F13E1BE45EB0C4305820 /* CPUTopProcesses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CBB9E16886FE1FADF1F4FF6 /* CPUTopProcesses.swift */; };
 		F8F5571A4CD34D880FBD9447 /* ArrowsReadWrite.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 9B49AE04BE430EF7354C0151 /* ArrowsReadWrite.tiff */; };
+		D1BC6D0FB2FCD44A3239ACE7 /* Updater.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A6EAC4F52C3A22BD64F492 /* Updater.swift */; };
+		01E8A4294607BC58C618B528 /* Acknowledgements.md in Resources */ = {isa = PBXBuildFile; fileRef = E677FEC2EC3AF07AD6D0718B /* Acknowledgements.md */; };
+		2DE37490E7E42E97FDDACD1F /* Sparkle-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 55A7095FAD395FB81BFEDF94 /* Sparkle-LICENSE.txt */; };
+		AA980EDB042898CB567C45DA /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 9E34D50A25481AA2A7AFB2F0 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +88,7 @@
 		47AFE81DE14884FE30B6EF2F /* ArrowsIdle.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = ArrowsIdle.tiff; sourceTree = "<group>"; };
 		4B1BF14D867EBFEECE40520B /* fr */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		4C738CFDB0EF7B8EB80428CF /* Uptime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Uptime.swift; sourceTree = "<group>"; };
+		E1A6EAC4F52C3A22BD64F492 /* Updater.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Updater.swift; sourceTree = "<group>"; };
 		4CBB9E16886FE1FADF1F4FF6 /* CPUTopProcesses.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CPUTopProcesses.swift; sourceTree = "<group>"; };
 		4E7A5E9E8278D6A26391B0E0 /* MenuExtraBase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuExtraBase.swift; sourceTree = "<group>"; };
 		4E87F00F38BF0DFE8FEEF139 /* it */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -124,6 +129,7 @@
 		A9DA551246D5D5340545F6BF /* zh-Hans */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		AB47C47DF8B052378A316205 /* MenuMeters.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = MenuMeters.app; path = MenuMeters.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AC3FEBA35CA716669E2C9C8D /* LICENSE */ = {isa = PBXFileReference; includeInIndex = 1; path = LICENSE; sourceTree = "<group>"; };
+		E677FEC2EC3AF07AD6D0718B /* Acknowledgements.md */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = net.daringfireball.markdown; name = Acknowledgements.md; path = Docs/Acknowledgements.md; sourceTree = "<group>"; };
 		AF4123C00DB6F8AE35867E92 /* LightsWrite.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = LightsWrite.tiff; sourceTree = "<group>"; };
 		B5D293DF075A752C5F6A6A3F /* Dark Color ArrowsIdle.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = "Dark Color ArrowsIdle.tiff"; sourceTree = "<group>"; };
 		B74E618BBB161528A04F5012 /* en */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/MenuMetersPref.strings; sourceTree = "<group>"; };
@@ -141,6 +147,7 @@
 		D952F3CB72EE8141E7195241 /* Dark Color ArrowsWrite.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = "Dark Color ArrowsWrite.tiff"; sourceTree = "<group>"; };
 		DBA515025E26BD4FD56FAD59 /* Disk ArrowsReadWrite.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = "Disk ArrowsReadWrite.tiff"; sourceTree = "<group>"; };
 		DDCF90A88D17F5FB73DAAD79 /* releases.html */ = {isa = PBXFileReference; includeInIndex = 1; path = releases.html; sourceTree = "<group>"; };
+		55A7095FAD395FB81BFEDF94 /* Sparkle-LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = "Sparkle-LICENSE.txt"; sourceTree = "<group>"; };
 		E5D6BBE5F61FCDE07655734C /* tr */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		E7101E778AC2989F9B4246FB /* Color ArrowsRead.tiff */ = {isa = PBXFileReference; includeInIndex = 1; path = "Color ArrowsRead.tiff"; sourceTree = "<group>"; };
 		EECB7FD178028B733C8B1BC6 /* NetExtra.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NetExtra.swift; sourceTree = "<group>"; };
@@ -156,6 +163,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA980EDB042898CB567C45DA /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,6 +238,7 @@
 				718E03EEC00C77A1EC29FBE4 /* Welcome.rtf */,
 				5DCAC7BB610982711335E148 /* com.ragingmenace.MenuMeters.plist */,
 				DDCF90A88D17F5FB73DAAD79 /* releases.html */,
+				55A7095FAD395FB81BFEDF94 /* Sparkle-LICENSE.txt */,
 				9026647C7FD78793732F13D0 /* Localizable.strings */,
 				60C4A7B3EAD1C640EB7AFC3C /* MenuMetersPref.strings */,
 				1E750EFF6C3E9975FC7CFB1C /* DiskImageSet.strings */,
@@ -261,6 +270,7 @@
 				354FDF25D96C9A4C5A0DA780 /* Support.swift */,
 				3DCC24C7782482915D086E7F /* TemperatureReader.swift */,
 				4C738CFDB0EF7B8EB80428CF /* Uptime.swift */,
+				E1A6EAC4F52C3A22BD64F492 /* Updater.swift */,
 				9C7E5EB26B9F0004B3DC3E92 /* main.swift */,
 			);
 			name = MenuMeters;
@@ -283,6 +293,7 @@
 				CA7AC791ACC356D9C9DBDD4F /* Resources */,
 				9AE1DEE3E548134D58B73AF4 /* MenuMeters-Info.plist */,
 				AC3FEBA35CA716669E2C9C8D /* LICENSE */,
+				E677FEC2EC3AF07AD6D0718B /* Acknowledgements.md */,
 			);
 			name = MenuMeters;
 			sourceTree = "<group>";
@@ -303,6 +314,9 @@
 			dependencies = (
 			);
 			name = MenuMeters;
+			packageProductDependencies = (
+				9E34D50A25481AA2A7AFB2F0 /* Sparkle */,
+			);
 			productName = MenuMeters;
 			productReference = AB47C47DF8B052378A316205 /* MenuMeters.app */;
 			productType = "com.apple.product-type.application";
@@ -334,6 +348,9 @@
 			);
 			mainGroup = FF507DDE0E4D3EAA40FF8296;
 			minimizedProjectReferenceProxies = 0;
+			packageReferences = (
+				439F272C6AF6B41529ECFDC0 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 100;
 			productRefGroup = C188E0E1C6F495D7E5A1EDDD /* Products */;
 			projectDirPath = "";
@@ -384,6 +401,8 @@
 				6F16D6BD66215D2FC3AB47BB /* MenuMetersPref.strings in Resources */,
 				B805F779C3B3E96218192042 /* DiskImageSet.strings in Resources */,
 				07224675AE7965F030D629D5 /* LICENSE in Resources */,
+				01E8A4294607BC58C618B528 /* Acknowledgements.md in Resources */,
+				2DE37490E7E42E97FDDACD1F /* Sparkle-LICENSE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -414,6 +433,7 @@
 				D0E2EAA54B9E1BE1086AAE70 /* Support.swift in Sources */,
 				E9E7741AE9D08E8CC4670315 /* TemperatureReader.swift in Sources */,
 				65B4889393B9BABB82BF6683 /* Uptime.swift in Sources */,
+				D1BC6D0FB2FCD44A3239ACE7 /* Updater.swift in Sources */,
 				3202E6D6CBB8574C9330B8C5 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -478,19 +498,24 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Resources/MenuMeters-adhoc.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = NO;
-				CURRENT_PROJECT_VERSION = 3.0.1;
+				CURRENT_PROJECT_VERSION = 30100;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "MenuMeters-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 3.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yujitach.MenuMeters;
+				MARKETING_VERSION = 3.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = it.salamacchine.menumeters;
 				PRODUCT_NAME = MenuMeters;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -626,18 +651,23 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Resources/MenuMeters-adhoc.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = NO;
-				CURRENT_PROJECT_VERSION = 3.0.1;
+				CURRENT_PROJECT_VERSION = 30100;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "MenuMeters-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 3.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yujitach.MenuMeters;
+				MARKETING_VERSION = 3.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = it.salamacchine.menumeters;
 				PRODUCT_NAME = MenuMeters;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -668,6 +698,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		439F272C6AF6B41529ECFDC0 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9E34D50A25481AA2A7AFB2F0 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 439F272C6AF6B41529ECFDC0 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 117B4FA3A691F1E21DAFED6C /* Project object */;
 }

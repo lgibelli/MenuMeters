@@ -105,3 +105,10 @@
 "Activity monitor:" = "Activity monitor:";
 "Opens specific panes" = "Opens specific panes";
 "pure black/white" = "pure black/white";
+
+/* Startup and updates */
+"Startup:" = "启动：";
+"Launch MenuMeters at login" = "登录时打开 MenuMeters";
+"Updates:" = "更新：";
+"Check for updates automatically" = "自动检查更新";
+"Check Now" = "立即检查";

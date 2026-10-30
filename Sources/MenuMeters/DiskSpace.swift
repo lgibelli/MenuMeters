@@ -4,6 +4,30 @@
 //
 //  Volume list and free-space statistics.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Number formatting based on code contributed by Mike Fischer.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: list only browsable local volumes, without blocking on network mounts.
+//
 
 import Cocoa
 
@@ -34,17 +58,30 @@ final class DiskSpace {
     var useBaseTen = false
 
     func diskSpaceData() -> [DiskSpaceInfo] {
+        // MNT_NOWAIT returns the kernel's cached list instead of asking every
+        // file system, so an unreachable network server cannot block us.
         var mountInfo: UnsafeMutablePointer<statfs>?
-        let mountCount = getmntinfo(&mountInfo, MNT_WAIT)
+        let mountCount = getmntinfo(&mountInfo, MNT_NOWAIT)
         guard mountCount > 0, let mountInfo else { return [] }
 
         var volumes: [DiskSpaceInfo] = []
         for index in 0..<Int(mountCount) {
-            let mount = mountInfo[index]
-            let fileSystem = cString(mount.f_fstypename)
-            guard localFileSystems.contains(fileSystem) else { continue }
+            let cached = mountInfo[index]
+            let fileSystem = cString(cached.f_fstypename)
+            // Hidden system volumes (/System/Volumes/*, Recovery, ...) are
+            // mounted "nobrowse", and Finder does not list them either.
+            guard localFileSystems.contains(fileSystem),
+                  cached.f_flags & UInt32(MNT_DONTBROWSE) == 0 else { continue }
 
-            let path = cString(mount.f_mntonname)
+            // Refresh the cached numbers, for local volumes only. Skip the
+            // volume if it was unmounted, or something else mounted there,
+            // since the list was taken.
+            let path = cString(cached.f_mntonname)
+            var mount = statfs()
+            guard statfs(path, &mount) == 0, cString(mount.f_mntonname) == path,
+                  cString(mount.f_fstypename) == fileSystem,
+                  mount.f_flags & UInt32(MNT_DONTBROWSE) == 0 else { continue }
+
             let url = URL(fileURLWithPath: path, isDirectory: true)
             let volumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
             let name = volumeName ?? url.lastPathComponent
@@ -89,12 +126,11 @@ final class DiskSpace {
         return number + L(unit)
     }
 
+    /// Converts a fixed-size C char array, stopping at the first NUL or at the
+    /// end of the array, whichever comes first.
     private func cString<T>(_ value: T) -> String {
-        var value = value
-        return withUnsafePointer(to: &value) {
-            $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout<T>.size) {
-                String(cString: $0)
-            }
+        withUnsafeBytes(of: value) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
         }
     }
 }
