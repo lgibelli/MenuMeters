@@ -21,7 +21,7 @@
 // Single day format
 "%ld day %02ld:%02ld:%02ld" = "%1$ld 日 %2$02ld 時間 %3$02ld 分 %4$02ld 秒";
 // Less than one day format
-"%02ld:%02ld:%02ld" = "%1$02ld 時間 %3$02ld 分 %4$02ld 秒";
+"%02ld:%02ld:%02ld" = "%1$02ld 時間 %2$02ld 分 %3$02ld 秒";
 
 // Tasks and threads title
 "Tasks/Threads:" = "タスク／スレッド：";

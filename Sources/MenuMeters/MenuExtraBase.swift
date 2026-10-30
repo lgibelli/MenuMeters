@@ -5,6 +5,28 @@
 //  Common NSStatusItem lifecycle, theme handling, menu plumbing and
 //  Activity Monitor integration.
 //
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: one menu refilled in place; a re-enabled meter is forced visible.
+//
 
 import Cocoa
 import ApplicationServices
@@ -91,6 +113,10 @@ class MenuExtraBase: NSObject, NSMenuDelegate {
                 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 item.autosaveName = bundleID
                 item.behavior = .removalAllowed
+                // The autosave name restores a hidden state left by an earlier
+                // Command-drag out of the menu bar. The meter is enabled, so show
+                // it before observing, or nothing would ever notice it is hidden.
+                item.isVisible = true
                 item.addObserver(self, forKeyPath: "visible", options: [.new], context: nil)
                 observingStatusItem = true
                 item.button?.addObserver(self, forKeyPath: "effectiveAppearance",
@@ -99,9 +125,7 @@ class MenuExtraBase: NSObject, NSMenuDelegate {
                 statusItem = item
             }
             if let item = statusItem {
-                let newMenu = menu()
-                newMenu.delegate = self
-                item.menu = newMenu
+                attachMenu(to: item)
             }
             updateTimer?.invalidate()
             let timer = Timer(timeInterval: interval, repeats: true) { [weak self] timer in
@@ -237,8 +261,18 @@ class MenuExtraBase: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         if let item = statusItem {
-            let newMenu = self.menu()
-            newMenu.delegate = self
+            attachMenu(to: item)
+        }
+    }
+
+    /// Refreshes the meter's menu and attaches it to the status item. Meters
+    /// refill one menu in place: AppKit has already picked the menu it is about
+    /// to show by the time it asks for an update, so a replacement would only
+    /// appear on the next click.
+    private func attachMenu(to item: NSStatusItem) {
+        let newMenu = menu()
+        newMenu.delegate = self
+        if item.menu !== newMenu {
             item.menu = newMenu
         }
     }
