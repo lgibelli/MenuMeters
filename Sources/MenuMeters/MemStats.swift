@@ -4,6 +4,30 @@
 //
 //  Virtual memory, swap and memory-pressure statistics.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Swap usage and encryption based on a patch from Michael Nordmeyer.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: report memory pressure, not availability; add read-only snapshots.
+//
 
 import Cocoa
 
@@ -25,6 +49,8 @@ struct MemSample {
     let cowFaults: UInt64
     let deltaPageIns: UInt64
     let deltaPageOuts: UInt64
+    /// Memory pressure in percent (0...100). The kernel reports the opposite,
+    /// the percentage of memory available, as kern.memorystatus_level.
     let pressure: Int32
     let pressureLevel: Int32
 }
@@ -53,7 +79,18 @@ final class MemStats {
 
     // MARK: - Memory
 
+    /// Samples memory and advances the page-in/out baselines, so the next
+    /// sample's deltas start here. Only the meter's timer should call this.
     func memStats() -> MemSample? {
+        guard let sample = memSnapshot() else { return nil }
+        lastPageIn = sample.pageIns
+        lastPageOut = sample.pageOuts
+        return sample
+    }
+
+    /// Samples memory without touching the page-in/out baselines; the deltas
+    /// are relative to the last `memStats()` call.
+    func memSnapshot() -> MemSample? {
         var stats = vm_statistics64_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size /
                                            MemoryLayout<integer_t>.size)
@@ -66,8 +103,6 @@ final class MemStats {
 
         let deltaIn = stats.pageins >= lastPageIn ? stats.pageins - lastPageIn : stats.pageins
         let deltaOut = stats.pageouts >= lastPageOut ? stats.pageouts - lastPageOut : stats.pageouts
-        lastPageIn = stats.pageins
-        lastPageOut = stats.pageouts
 
         let pageSize = UInt64(vm_page_size)
         let active = UInt64(stats.active_count) * pageSize
@@ -96,8 +131,8 @@ final class MemStats {
             cowFaults: stats.cow_faults,
             deltaPageIns: deltaIn,
             deltaPageOuts: deltaOut,
-            pressure: sysctlInt("kern.memorystatus_level"),
-            pressureLevel: sysctlInt("kern.memorystatus_vm_pressure_level")
+            pressure: sysctlInt("kern.memorystatus_level").map { 100 - min(100, max(0, $0)) } ?? 0,
+            pressureLevel: sysctlInt("kern.memorystatus_vm_pressure_level") ?? 0
         )
     }
 
@@ -161,9 +196,9 @@ final class MemStats {
         }
     }
 
-    private func sysctlInt(_ name: String) -> Int32 {
+    private func sysctlInt(_ name: String) -> Int32? {
         var value: Int32 = 0
         var size = MemoryLayout<Int32>.size
-        return sysctlbyname(name, &value, &size, nil, 0) == 0 ? value : 0
+        return sysctlbyname(name, &value, &size, nil, 0) == 0 ? value : nil
     }
 }

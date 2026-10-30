@@ -4,6 +4,30 @@
 //
 //  Disk activity menu bar meter.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Large arrow disk icon overlays based on patches by Mac-arena the Bored Zo.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: safer, asynchronous eject with error reporting.
+//
 
 import Cocoa
 
@@ -15,6 +39,8 @@ final class DiskExtra: MenuExtraBase {
     private var displayedActivity: DiskActivity = .idle
     private var fgMenuThemeColor: NSColor = .labelColor
     private var blankImage = NSImage(size: NSSize(width: Disk.viewWidth, height: 22))
+    /// Running diskutil eject/unmount tasks, keyed by mount path.
+    private var ejectTasks: [String: Process] = [:]
 
     override init(bundleID: String) {
         super.init(bundleID: bundleID)
@@ -229,6 +255,8 @@ final class DiskExtra: MenuExtraBase {
         guard let path = sender.representedObject as? String else { return }
         var eject = Prefs.shared.diskSelectMode == 1
         if NSEvent.modifierFlags.contains(.option) { eject.toggle() }
+        // The boot volume and the system volumes are never ejected; open them.
+        if path == "/" || path.hasPrefix("/System/Volumes/") { eject = false }
 
         let url = URL(fileURLWithPath: path, isDirectory: true)
         guard eject else {
@@ -237,18 +265,57 @@ final class DiskExtra: MenuExtraBase {
             }
             return
         }
+        guard ejectTasks[path] == nil else { return }
 
-        let removable = (try? url.resourceValues(forKeys: [.volumeIsRemovableKey]))?
-            .volumeIsRemovable ?? false
+        // Like Finder, eject removable media and external disks; volumes on
+        // internal disks are only unmounted.
+        let values = try? url.resourceValues(forKeys: [.volumeIsEjectableKey, .volumeIsInternalKey])
+        let ejectable = values?.volumeIsEjectable ?? false
+        let isInternal = values?.volumeIsInternal ?? true
+        let verb = ejectable || !isInternal ? "eject" : "unmount"
+        let name = FileManager.default.displayName(atPath: path)
+
+        let errorPipe = Pipe()
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
-        task.arguments = [removable ? "eject" : "unmount", path]
+        task.arguments = [verb, path]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = errorPipe
+        task.terminationHandler = { [weak self] task in
+            // diskutil reports a failure in a line or two, far below the pipe
+            // buffer, so reading it once the task has exited cannot deadlock.
+            let output = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let status = task.terminationStatus
+            DispatchQueue.main.async {
+                self?.ejectTasks[path] = nil
+                guard status != 0 else { return }
+                var message = String(decoding: output, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if message.isEmpty {
+                    message = String(format: L("diskutil exited with status %d."), status)
+                }
+                Self.reportEjectFailure(verb: verb, name: name, path: path, message: message)
+            }
+        }
+
+        ejectTasks[path] = task
         do {
             try task.run()
-            task.waitUntilExit()
         } catch {
-            NSLog("MenuMeterDisk unable to eject/unmount \"%@\" using diskutil: %@",
-                  path, error.localizedDescription)
+            ejectTasks[path] = nil
+            Self.reportEjectFailure(verb: verb, name: name, path: path,
+                                    message: error.localizedDescription)
         }
+    }
+
+    private static func reportEjectFailure(verb: String, name: String, path: String, message: String) {
+        NSLog("MenuMeterDisk unable to %@ \"%@\" using diskutil: %@", verb, path, message)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: verb == "eject" ? L("Unable to eject %@")
+                                                           : L("Unable to unmount %@"), name)
+        alert.informativeText = message
+        NSApp.activate()
+        alert.runModal()
     }
 }
