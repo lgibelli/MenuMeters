@@ -7,11 +7,11 @@
 	<key>CFBundleExecutable</key>
 	<string>MenuMeters</string>
 	<key>CFBundleGetInfoString</key>
-	<string>MenuMeters 3.0.1, by many contributors</string>
+	<string>MenuMeters 3.1.0, by many contributors</string>
 	<key>CFBundleIconFile</key>
 	<string>MenuMeters.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.yujitach.MenuMeters</string>
+	<string>it.salamacchine.menumeters</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -19,11 +19,11 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.0.1</string>
+	<string>3.1.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>3.0.1</string>
+	<string>30100</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
@@ -32,5 +32,15 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://www.salamacchine.it/apps/menumeters/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>eT+NnRW5YfooyX3NfNXgdoWKr+9WoTEDPrk0fMu4z/s=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

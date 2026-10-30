@@ -4,6 +4,29 @@
 //
 //  Typed access to the historical MenuMeters preference domain.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: new bundle identifier, with a one-time migration of the old preferences.
+//
 
 import Cocoa
 
@@ -11,7 +34,7 @@ final class Prefs {
     static let shared = Prefs()
 
     let defaults: UserDefaults
-    private let migrationKey = "migratedFromRagingMenaceToYujitach"
+    private let migrationKey = "migratedLegacyPreferences"
 
     private init() {
         defaults = .standard
@@ -353,27 +376,42 @@ final class Prefs {
 
     private func migrateIfNecessary() {
         guard !defaults.bool(forKey: migrationKey) else { return }
-        // Older MenuMeters stored its settings in com.ragingmenace.MenuMeters.
-        // The current app uses its own bundle identifier; copy every value that
-        // differs from the bundled defaults.
-        let oldPath = NSString(string: "~/Library/Preferences/\(MM.defaultsDomain).plist").expandingTildeInPath
-        if let data = FileManager.default.contents(atPath: oldPath),
-           let dict = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] {
-            let bundledDefaults: [String: Any] = {
-                guard let url = Bundle.main.url(forResource: MM.defaultsDomain, withExtension: "plist"),
-                      let data = try? Data(contentsOf: url),
-                      let dict = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] else { return [:] }
-                return dict
-            }()
-            for (key, value) in dict {
-                if let defaultValue = bundledDefaults[key],
-                   (value as? NSObject)?.isEqual(defaultValue) == true {
-                    continue
-                }
+        // MenuMeters 2.x and 3.0 stored their settings under the previous
+        // maintainer's bundle identifier. Take them over unchanged, except for
+        // the state of the Sparkle updater some of those builds carried, and
+        // whether the About text was shown: this version's text explains its
+        // automatic updates, so it is shown once more.
+        if let previous = defaults.persistentDomain(forName: MM.legacyAppBundleID), !previous.isEmpty {
+            for (key, value) in previous where !key.hasPrefix("SU") && key != "WelcomePresented" {
                 defaults.set(value, forKey: key)
             }
+        } else {
+            importRagingMenacePreferences()
         }
         defaults.set(true, forKey: migrationKey)
         defaults.synchronize()
+    }
+
+    private func importRagingMenacePreferences() {
+        // Older MenuMeters stored its settings in com.ragingmenace.MenuMeters.
+        // Copy every value that differs from the bundled defaults.
+        let oldPath = NSString(string: "~/Library/Preferences/\(MM.defaultsDomain).plist").expandingTildeInPath
+        guard let data = FileManager.default.contents(atPath: oldPath),
+              let dict = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] else {
+            return
+        }
+        let bundledDefaults: [String: Any] = {
+            guard let url = Bundle.main.url(forResource: MM.defaultsDomain, withExtension: "plist"),
+                  let data = try? Data(contentsOf: url),
+                  let dict = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] else { return [:] }
+            return dict
+        }()
+        for (key, value) in dict {
+            if let defaultValue = bundledDefaults[key],
+               (value as? NSObject)?.isEqual(defaultValue) == true {
+                continue
+            }
+            defaults.set(value, forKey: key)
+        }
     }
 }

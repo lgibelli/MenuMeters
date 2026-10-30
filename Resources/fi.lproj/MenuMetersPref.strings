@@ -105,3 +105,10 @@
 "Activity monitor:" = "Activity monitor:";
 "Opens specific panes" = "Opens specific panes";
 "pure black/white" = "pure black/white";
+
+/* Startup and updates */
+"Startup:" = "Käynnistys:";
+"Launch MenuMeters at login" = "Avaa MenuMeters kirjautuessa";
+"Updates:" = "Päivitykset:";
+"Check for updates automatically" = "Etsi päivityksiä automaattisesti";
+"Check Now" = "Etsi nyt";

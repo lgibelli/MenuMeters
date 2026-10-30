@@ -105,3 +105,10 @@
 "Activity monitor:" = "Activity monitor:";
 "Opens specific panes" = "Opens specific panes";
 "pure black/white" = "pure black/white";
+
+/* Startup and updates */
+"Startup:" = "起動:";
+"Launch MenuMeters at login" = "ログイン時に MenuMeters を開く";
+"Updates:" = "アップデート:";
+"Check for updates automatically" = "アップデートを自動的に確認";
+"Check Now" = "今すぐ確認";

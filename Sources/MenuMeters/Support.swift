@@ -4,6 +4,29 @@
 //
 //  Shared constants, localization, notifications and small helpers.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: login item follows the user's choice; activation policy helper; new bundle identifier.
+//
 
 import Cocoa
 import ServiceManagement
@@ -24,7 +47,10 @@ enum MM {
     static let memBundleID = "com.ragingmenace.MenuMeterMem"
     static let netBundleID = "com.ragingmenace.MenuMeterNet"
     static let prefsBundleID = "com.ragingmenace.MenuMeters"
-    static let appBundleID = "com.yujitach.MenuMeters"
+    static let appBundleID = "it.salamacchine.menumeters"
+    /// The bundle identifier of MenuMeters 2.x and 3.0, whose settings are
+    /// imported once.
+    static let legacyAppBundleID = "com.yujitach.MenuMeters"
 
     static let allMeterIDs = [cpuBundleID, diskBundleID, memBundleID, netBundleID]
     static let meterCountMax = 25
@@ -204,13 +230,15 @@ enum AppLauncher {
 // MARK: - Login item
 
 enum LoginItem {
+    private static let configuredKey = "LoginItemConfigured"
+
     /// Registers the app as a login item. Used by the preferences checkbox.
     static func setEnabled(_ enabled: Bool) {
         let service = SMAppService.mainApp
         do {
             if enabled {
                 if service.status != .enabled { try service.register() }
-            } else if service.status == .enabled {
+            } else if service.status == .enabled || service.status == .requiresApproval {
                 try service.unregister()
             }
         } catch {
@@ -220,6 +248,43 @@ enum LoginItem {
 
     static func isEnabled() -> Bool {
         SMAppService.mainApp.status == .enabled
+    }
+
+    /// Registers the login item on the first launch only. After that the
+    /// choice belongs to the user, in Preferences or in System Settings.
+    static func registerOnFirstLaunch() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: configuredKey) else { return }
+        defaults.set(true, forKey: configuredKey)
+        setEnabled(true)
+    }
+
+    /// Records that the user has made a choice, so the first-launch
+    /// registration does not override it.
+    static func markConfigured() {
+        UserDefaults.standard.set(true, forKey: configuredKey)
+    }
+}
+
+// MARK: - Activation policy
+
+/// MenuMeters is an accessory app with no Dock icon. A window that needs the
+/// Dock icon and the app menu, such as the preferences or an update alert,
+/// holds a reason while it is up; the last one released returns the app to the
+/// menu bar.
+enum ActivationPolicy {
+    private static var reasons = Set<String>()
+
+    static func hold(_ reason: String) {
+        reasons.insert(reason)
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    static func release(_ reason: String) {
+        reasons.remove(reason)
+        if reasons.isEmpty {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
 

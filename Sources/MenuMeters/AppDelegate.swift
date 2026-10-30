@@ -4,6 +4,30 @@
 //
 //  Application lifecycle: preferences, meters and the menu bar.
 //
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  The read-only volume check is adapted from Squirrel.Mac (MIT License);
+//  see Docs/Acknowledgements.md.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: single instance in both directions, login item on first launch only, Sparkle updates.
+//
 
 import Cocoa
 
@@ -11,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let welcomeFile = "Welcome"
 
     private var prefsWindow: PrefsWindowController?
+    private var updater: Updater?
+    private var appMenu: NSMenu?
     private var cpuExtra: CPUExtra?
     private var diskExtra: DiskExtra?
     private var netExtra: NetExtra?
@@ -30,9 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alertConcerningAppTranslocation()
         }
 
+        // A newer copy already in the menu bar wins; two would show every meter twice.
+        guard !newerInstanceIsRunning() else {
+            NSApp.terminate(nil)
+            return
+        }
         killOlderInstances()
 
-        prefsWindow = PrefsWindowController(aboutFile: Self.welcomeFile)
+        let updater = Updater()
+        self.updater = updater
+        appMenu?.insertItem(updater.makeMenuItem(), at: 1)
+
+        prefsWindow = PrefsWindowController(aboutFile: Self.welcomeFile, updater: updater)
 
         let key = Self.welcomeFile + "Presented"
         if !UserDefaults.standard.bool(forKey: key) {
@@ -47,9 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         netExtra = NetExtra(bundleID: MM.netBundleID)
         memExtra = MemExtra(bundleID: MM.memBundleID)
 
-        if !LoginItem.isEnabled() {
-            LoginItem.setEnabled(true)
-        }
+        LoginItem.registerOnFirstLaunch()
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -71,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
+        self.appMenu = appMenu
 
         let about = NSMenuItem(title: "About MenuMeters",
                                action: #selector(showAbout(_:)), keyEquivalent: "")
@@ -107,20 +141,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Single instance and translocation
 
-    private func killOlderInstances() {
-        let thisVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+    private static var bundleVersion: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+    }
+
+    /// The other running copies of this app, with their bundle versions.
+    private func otherInstances() -> [(app: NSRunningApplication, version: String)] {
         let thisProcess = ProcessInfo.processInfo.processIdentifier
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: MM.appBundleID) {
-            guard app.processIdentifier != thisProcess else { continue }
-            let version = app.bundleURL
-                .flatMap { Bundle(url: $0) }?
-                .infoDictionary?["CFBundleVersion"] as? String ?? "0"
-            let result = Version.compare(version, thisVersion)
-            NSLog("MenuMeters: running version \(version), ours \(thisVersion)")
-            if result != .orderedDescending {
-                NSLog("MenuMeters: terminating older instance \(version)")
-                app.terminate()
+        return NSRunningApplication.runningApplications(withBundleIdentifier: MM.appBundleID)
+            .filter { $0.processIdentifier != thisProcess }
+            .map { app in
+                let version = app.bundleURL
+                    .flatMap { Bundle(url: $0) }?
+                    .infoDictionary?["CFBundleVersion"] as? String ?? "0"
+                return (app, version)
             }
+    }
+
+    private func newerInstanceIsRunning() -> Bool {
+        otherInstances().contains { other in
+            let newer = Version.compare(other.version, Self.bundleVersion) == .orderedDescending
+            if newer {
+                NSLog("MenuMeters: version \(other.version) is already running, ours is \(Self.bundleVersion)")
+            }
+            return newer
+        }
+    }
+
+    private func killOlderInstances() {
+        for other in otherInstances() {
+            NSLog("MenuMeters: terminating instance \(other.version), ours is \(Self.bundleVersion)")
+            other.app.terminate()
+        }
+        // Builds from before the bundle identifier changed are always older,
+        // and would show every meter a second time.
+        for legacy in NSRunningApplication.runningApplications(withBundleIdentifier: MM.legacyAppBundleID) {
+            NSLog("MenuMeters: terminating the copy with the old bundle identifier")
+            legacy.terminate()
         }
     }
 

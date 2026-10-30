@@ -20,15 +20,29 @@ jobs:
         run: ./build-clt.sh
       - name: Verify app bundle
         run: |
-          lipo -info out/MenuMeters.app/Contents/MacOS/MenuMeters
-          codesign --verify --deep --strict out/MenuMeters.app
-          test -f out/MenuMeters.app/Contents/Resources/en.lproj/Localizable.strings
-          test -f "out/MenuMeters.app/Contents/Resources/Color ArrowsIdle.tiff"
+          APP=out/MenuMeters.app
+          lipo -info "$APP/Contents/MacOS/MenuMeters"
+          codesign --verify --deep --strict "$APP"
+          flags=$(codesign -d --verbose=2 "$APP" 2>&1 | grep -o 'flags=0x[0-9a-f]*([^)]*)' || true)
+          echo "$flags"
+          case "$flags" in *runtime*) ;; *) echo "hardened runtime missing"; exit 1 ;; esac
+          test -f "$APP/Contents/Resources/en.lproj/Localizable.strings"
+          test -f "$APP/Contents/Resources/Color ArrowsIdle.tiff"
+          test -f "$APP/Contents/Resources/Acknowledgements.md"
+          test -f "$APP/Contents/Resources/Sparkle-LICENSE.txt"
+          test -d "$APP/Contents/Frameworks/Sparkle.framework"
+      - name: Check that Sparkle loads
+        # dyld aborts the launch if the framework cannot be loaded.
+        run: out/MenuMeters.app/Contents/MacOS/MenuMeters --unregister-login-item
+      - name: Archive app bundle
+        # A zip made by ditto keeps the executable bits, symlinks and code
+        # signature that uploading the bare bundle would lose.
+        run: ditto -c -k --keepParent out/MenuMeters.app out/MenuMeters-clt.zip
       - name: Upload app bundle
         uses: actions/upload-artifact@v7
         with:
           name: MenuMeters-clt
-          path: out/MenuMeters.app
+          path: out/MenuMeters-clt.zip
 
   xcode:
     name: Xcode build
@@ -38,6 +52,7 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
       - name: Build MenuMeters
+        # The project signs ad hoc, with the hardened runtime.
         run: |
           xcodebuild \
             -project MenuMeters.xcodeproj \
@@ -45,16 +60,26 @@ jobs:
             -configuration Release \
             -destination "platform=macOS" \
             -derivedDataPath out/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
             build
       - name: Verify Xcode app bundle
         run: |
           APP=out/DerivedData/Build/Products/Release/MenuMeters.app
           test -x "$APP/Contents/MacOS/MenuMeters"
+          codesign --verify --deep --strict "$APP"
+          flags=$(codesign -d --verbose=2 "$APP" 2>&1 | grep -o 'flags=0x[0-9a-f]*([^)]*)' || true)
+          echo "$flags"
+          case "$flags" in *runtime*) ;; *) echo "hardened runtime missing"; exit 1 ;; esac
           test -f "$APP/Contents/Resources/en.lproj/Localizable.strings"
           test -f "$APP/Contents/Resources/Color ArrowsIdle.tiff"
+          test -f "$APP/Contents/Resources/Acknowledgements.md"
+          test -f "$APP/Contents/Resources/Sparkle-LICENSE.txt"
+          test -d "$APP/Contents/Frameworks/Sparkle.framework"
+      - name: Check that Sparkle loads
+        run: out/DerivedData/Build/Products/Release/MenuMeters.app/Contents/MacOS/MenuMeters --unregister-login-item
+      - name: Archive app bundle
+        run: ditto -c -k --keepParent out/DerivedData/Build/Products/Release/MenuMeters.app out/MenuMeters-xcode.zip
       - name: Upload app bundle
         uses: actions/upload-artifact@v7
         with:
           name: MenuMeters-xcode
-          path: out/DerivedData/Build/Products/Release/MenuMeters.app
+          path: out/MenuMeters-xcode.zip

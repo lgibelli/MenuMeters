@@ -4,9 +4,33 @@
 //
 //  The five-tab preferences window, built programmatically.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: login item and update controls; meter changes are always announced.
+//
 
 import Cocoa
 import ApplicationServices
+import ServiceManagement
 
 final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTabViewDelegate {
     private let prefs = Prefs.shared
@@ -98,12 +122,19 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
 
     // About
     private var activityMonitorPaneCheckbox: NSButton!
+    private var loginItemCheckbox: NSButton!
+    private var automaticUpdatesCheckbox: NSButton!
+    private var checkForUpdatesButton: NSButton!
     private var tintPercentageSlider: NSSlider!
 
-    init(aboutFile: String) {
+    private let updater: Updater?
+
+    init(aboutFile: String, updater: Updater?) {
         self.aboutFile = aboutFile
+        self.updater = updater
         super.init(window: nil)
         setUp()
+        updater?.onAvailabilityChange = { [weak self] in self?.updateUpdateControls() }
     }
 
     required init?(coder: NSCoder) {
@@ -421,15 +452,15 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
         let tabView = NSView(frame: NSRect(x: 10, y: 33, width: 548, height: 606))
         tabView.autoresizingMask = [.width, .height]
 
-        let scroll = NSScrollView(frame: NSRect(x: -3, y: 120, width: 554, height: 483))
+        let scroll = NSScrollView(frame: NSRect(x: -3, y: 180, width: 554, height: 423))
         scroll.borderType = .noBorder
         scroll.hasHorizontalScroller = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.autoresizingMask = [.width, .height]
 
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 554, height: 483))
-        textView.minSize = NSSize(width: 0, height: 483)
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 554, height: 423))
+        textView.minSize = NSSize(width: 0, height: 423)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -447,24 +478,39 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
         aboutView = textView
         tabView.addSubview(scroll)
 
-        let footer = NSView(frame: NSRect(x: -3, y: -3, width: 554, height: 125))
+        let footer = NSView(frame: NSRect(x: -3, y: -3, width: 554, height: 185))
         footer.autoresizingMask = [.maxXMargin, .maxYMargin]
         tabView.addSubview(footer)
 
-        _ = label(footer, "Color tint:", NSRect(x: 25, y: 82, width: 195, height: 16),
+        _ = label(footer, "Color tint:", NSRect(x: 25, y: 142, width: 195, height: 16),
                   .right, 13, .labelColor)
-        _ = label(footer, "original", NSRect(x: 233, y: 99, width: 109, height: 16),
+        _ = label(footer, "original", NSRect(x: 233, y: 159, width: 109, height: 16),
                   .left, 13, .secondaryLabelColor)
-        _ = label(footer, "Activity monitor:", NSRect(x: 25, y: 52, width: 195, height: 16),
+        _ = label(footer, "Activity monitor:", NSRect(x: 25, y: 112, width: 195, height: 16),
                   .right, 13, .labelColor)
         activityMonitorPaneCheckbox = checkbox(footer, "Opens specific panes",
-                                               NSRect(x: 230, y: 51, width: 306, height: 18),
+                                               NSRect(x: 230, y: 111, width: 306, height: 18),
                                                #selector(showAlertConcerningSystemEventsEtc(_:)))
-        tintPercentageSlider = slider(footer, NSRect(x: 230, y: 76, width: 306, height: 28),
+        tintPercentageSlider = slider(footer, NSRect(x: 230, y: 136, width: 306, height: 28),
                                       0, 100, 10, 0, false, true, .regular,
                                       #selector(tintPercentageChanged(_:)))
-        _ = label(footer, "pure black/white", NSRect(x: 427, y: 99, width: 109, height: 16),
+        _ = label(footer, "pure black/white", NSRect(x: 427, y: 159, width: 109, height: 16),
                   .right, 13, .secondaryLabelColor)
+        _ = label(footer, "Startup:", NSRect(x: 25, y: 82, width: 195, height: 16),
+                  .right, 13, .labelColor)
+        loginItemCheckbox = checkbox(footer, "Launch MenuMeters at login",
+                                     NSRect(x: 230, y: 81, width: 306, height: 18),
+                                     #selector(loginItemChanged(_:)))
+        _ = label(footer, "Updates:", NSRect(x: 25, y: 52, width: 195, height: 16),
+                  .right, 13, .labelColor)
+        automaticUpdatesCheckbox = checkbox(footer, "Check for updates automatically",
+                                            NSRect(x: 230, y: 51, width: 306, height: 18),
+                                            #selector(automaticUpdatesChanged(_:)))
+        checkForUpdatesButton = NSButton(title: LP("Check Now"), target: self,
+                                         action: #selector(checkForUpdatesNow(_:)))
+        checkForUpdatesButton.frame = NSRect(x: 224, y: 14, width: 140, height: 32)
+        checkForUpdatesButton.font = .systemFont(ofSize: 13)
+        footer.addSubview(checkForUpdatesButton)
 
         item.view = tabView
         prefTabs.addTabViewItem(item)
@@ -612,7 +658,7 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
     }
 
     private func promotePreferences() {
-        NSApp.setActivationPolicy(.regular)
+        ActivationPolicy.hold("preferences")
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -652,12 +698,14 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
 
     func windowWillClose(_ notification: Notification) {
         if !noMenuMeterLoaded {
-            NSApp.setActivationPolicy(.accessory)
+            ActivationPolicy.release("preferences")
         }
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         refreshPowerMateAvailability()
+        updateLoginItemControl()
+        updateUpdateControls()
         updateNetInterfaceMenu()
         updateAllControls()
     }
@@ -708,8 +756,9 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
         }
     }
 
+    /// Delivered even to a disabled meter: it may still own hardware, such as
+    /// the PowerMate, that has to follow the change.
     private func notifyMeter(_ bundleID: String) {
-        guard prefs.meterEnabled(bundleID) else { return }
         NotificationCenter.default.post(name: Notification.Name(bundleID), object: MM.prefChange)
     }
 
@@ -777,6 +826,44 @@ final class PrefsWindowController: NSWindowController, NSWindowDelegate, NSToolb
     private func setupAboutControls() {
         tintPercentageSlider.doubleValue = prefs.tintPercentage
         activityMonitorPaneCheckbox.state = prefs.activityMonitorSpecificPanes ? .on : .off
+        updateLoginItemControl()
+        updateUpdateControls()
+    }
+
+    /// The login item can also be changed in System Settings, so this follows
+    /// the system's state rather than a preference of our own.
+    private func updateLoginItemControl() {
+        loginItemCheckbox.state = LoginItem.isEnabled() ? .on : .off
+    }
+
+    @objc private func loginItemChanged(_ sender: Any?) {
+        let enabled = loginItemCheckbox.state == .on
+        LoginItem.markConfigured()
+        LoginItem.setEnabled(enabled)
+        if enabled && SMAppService.mainApp.status == .requiresApproval {
+            // Turned off in System Settings before: only the user can turn it
+            // back on there.
+            SMAppService.openSystemSettingsLoginItems()
+        }
+        updateLoginItemControl()
+    }
+
+    /// Sparkle owns the automatic-check setting and knows when a check is
+    /// already running; the controls only mirror it.
+    private func updateUpdateControls() {
+        guard let automaticUpdatesCheckbox, let checkForUpdatesButton else { return }
+        automaticUpdatesCheckbox.isEnabled = updater != nil
+        automaticUpdatesCheckbox.state = updater?.automaticallyChecksForUpdates == true ? .on : .off
+        checkForUpdatesButton.isEnabled = updater?.canCheckForUpdates == true
+    }
+
+    @objc private func automaticUpdatesChanged(_ sender: Any?) {
+        updater?.automaticallyChecksForUpdates = automaticUpdatesCheckbox.state == .on
+        updateUpdateControls()
+    }
+
+    @objc private func checkForUpdatesNow(_ sender: Any?) {
+        updater?.checkForUpdates()
     }
 
     @objc private func tintPercentageChanged(_ sender: Any?) {
