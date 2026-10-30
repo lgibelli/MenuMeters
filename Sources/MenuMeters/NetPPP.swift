@@ -4,6 +4,29 @@
 //
 //  Best-effort PPP status (pppconfd) and connection control.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: pppconfd socket gets SO_NOSIGPIPE, timeouts and reconnect; Connect no longer uses unsafeBitCast.
+//
 
 import Foundation
 import Darwin
@@ -39,7 +62,7 @@ final class NetPPP {
     static let waitOnBusy: UInt32 = 13
 
     private static let socketPath = "/var/run/pppconfd"
-    private static let networkConnectDomain = "com.apple.networkConnect"
+    private static let maxReplyLength: UInt32 = 0x10000
 
     private var socketFD: Int32 = -1
 
@@ -50,6 +73,20 @@ final class NetPPP {
     private static func openSocket() -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return -1 }
+
+        // Requests run on the main thread: a vanished configd must not raise
+        // SIGPIPE, and a stalled one must not block for long.
+        var noSigPipe: Int32 = 1
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe,
+                         socklen_t(MemoryLayout<Int32>.size)) == 0,
+              setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout,
+                         socklen_t(MemoryLayout<timeval>.size)) == 0,
+              setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                         socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            close(fd)
+            return -1
+        }
 
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -80,7 +117,12 @@ final class NetPPP {
     }
 
     deinit {
+        closeSocket()
+    }
+
+    private func closeSocket() {
         if socketFD >= 0 { close(socketFD) }
+        socketFD = -1
     }
 
     // MARK: - Status
@@ -112,15 +154,10 @@ final class NetPPP {
     private func startConnection(serviceID: String) -> Bool {
         guard let connection = SCNetworkConnectionCreateWithServiceID(nil, serviceID as CFString,
                                                                       nil, nil) else { return false }
-        let options = CFPreferencesCopyValue(serviceID as CFString,
-                                             Self.networkConnectDomain as CFString,
-                                             kCFPreferencesCurrentUser,
-                                             kCFPreferencesCurrentHost) as? [Any]
-        if let first = options?.first {
-            return SCNetworkConnectionStart(connection,
-                                            unsafeBitCast(first, to: CFDictionary.self), true)
-        }
-        return SCNetworkConnectionStart(connection, nil, true)
+        // Reuse the options the system last started this service with; when
+        // there are none, the service's configured defaults apply.
+        let options = SCNetworkConnectionCopyUserOptions(connection)
+        return SCNetworkConnectionStart(connection, options, true)
     }
 
     private func stopConnection(serviceID: String) -> Bool {
@@ -163,8 +200,6 @@ final class NetPPP {
 
     private func execute(type: UInt16, link: UInt32 = 0,
                          payload: Data = Data()) -> Data? {
-        guard socketFD >= 0 else { return nil }
-
         // struct ppp_msg_hdr: flags, type, result, cookie, link, length.
         var message = Data()
         Self.appendUInt16(0, to: &message)
@@ -175,11 +210,29 @@ final class NetPPP {
         Self.appendUInt32(UInt32(payload.count), to: &message)
         message.append(payload)
 
+        // A connection made before configd restarted fails on first use, so
+        // an I/O failure on a reused socket is retried once on a new one.
+        while true {
+            let reused = socketFD >= 0
+            if !reused { socketFD = Self.openSocket() }
+            guard socketFD >= 0 else { return nil }
+            let reply = exchange(message)
+            if socketFD >= 0 || !reused { return reply }
+        }
+    }
+
+    /// One request and its reply. Any I/O failure closes the socket, since a
+    /// timed out or partial reply leaves the stream out of step.
+    private func exchange(_ message: Data) -> Data? {
         guard writeAll(message), let headerData = readExactly(20),
               let result = Self.uint32(headerData, at: 4),
               let length = Self.uint32(headerData, at: 16),
-              length > 0, result == 0 else { return nil }
-        guard let reply = readExactly(Int(length)), reply.count == Int(length) else { return nil }
+              length <= Self.maxReplyLength,
+              let reply = readExactly(Int(length)) else {
+            closeSocket()
+            return nil
+        }
+        guard length > 0, result == 0 else { return nil }
         return reply
     }
 

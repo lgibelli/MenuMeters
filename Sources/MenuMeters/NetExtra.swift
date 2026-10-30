@@ -4,6 +4,30 @@
 //
 //  Network menu bar meter.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//  Number formatting based on code contributed by Mike Fischer.
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: refill one menu in place, re-baseline when sampling starts, list IPv6-only addresses, drop dead app items.
+//
 
 import Cocoa
 
@@ -12,7 +36,11 @@ final class NetExtra: MenuExtraBase {
     private let netStats = NetStats()
     private let pppControl = NetPPP.shared
 
-    private var extraMenu = NSMenu()
+    private let extraMenu: NSMenu = {
+        let menu = NSMenu(title: "")
+        menu.autoenablesItems = false
+        return menu
+    }()
     private let bytesFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.localizesFormat = true
@@ -34,7 +62,8 @@ final class NetExtra: MenuExtraBase {
     private var downArrow = NSBezierPath()
     private var throughputLabelWidth: CGFloat = 0
 
-    private var lastSampleDate: Date?
+    // NetStats takes its first baseline when it is created, just above.
+    private var lastSampleDate: Date? = Date()
     private var netHistoryData: [[String: NetInterfaceStats]] = []
     private var netHistoryIntervals: [TimeInterval] = []
     private var preferredInterfaceConfig: NetInterfaceConfig?
@@ -65,6 +94,12 @@ final class NetExtra: MenuExtraBase {
 
     override func configFromPrefs(_ notification: Notification?) {
         let prefs = Prefs.shared
+        if statusItem == nil && prefs.meterEnabled(bundleID) {
+            // Sampling (re)starts below: take a fresh baseline so the first
+            // sample does not span the time the meter was off.
+            _ = netStats.netStats(forInterval: 0)
+            lastSampleDate = Date()
+        }
         configDisplay(interval: prefs.netInterval)
         setupColor()
 
@@ -234,37 +269,28 @@ final class NetExtra: MenuExtraBase {
         preferredInterfaceConfig = netConfig.interfaceConfig(for: Prefs.shared.netPreferInterface)
         updateMenuItems = [:]
 
-        let menu = NSMenu(title: "")
-        menu.autoenablesItems = false
-        extraMenu = menu
+        // AppKit keeps displaying the menu it already has, so refill that one.
+        let menu = extraMenu
+        menu.removeAllItems()
 
         if let hostname = netConfig.computerName() {
             addDisabled(hostname, to: menu)
             menu.addItem(.separator())
         }
 
-        var pppPresent = false
         let detailsList = netConfig.interfaceDetails()
         if detailsList.isEmpty {
             addDisabled(L("No Active Interfaces"), to: menu)
         } else {
             for details in detailsList {
-                appendInterface(details, to: menu, pppPresent: &pppPresent)
+                appendInterface(details, to: menu)
             }
         }
 
         menu.addItem(.separator())
-        let utility = menu.addItem(withTitle: L("Open Network Utility"),
-                                   action: #selector(openNetworkUtil(_:)), keyEquivalent: "")
-        utility.target = self
         let prefsItem = menu.addItem(withTitle: L("Open Network Preferences"),
                                      action: #selector(openNetworkPrefs(_:)), keyEquivalent: "")
         prefsItem.target = self
-        if pppPresent {
-            let internetConnect = menu.addItem(withTitle: L("Open Internet Connect"),
-                                               action: #selector(openInternetConnect(_:)), keyEquivalent: "")
-            internetConnect.target = self
-        }
         addStandardMenuEntries(to: menu)
     }
 
@@ -276,8 +302,7 @@ final class NetExtra: MenuExtraBase {
         return item
     }
 
-    private func appendInterface(_ details: NetInterfaceDetails, to menu: NSMenu,
-                                 pppPresent: inout Bool) {
+    private func appendInterface(_ details: NetInterfaceDetails, to menu: NSMenu) {
         let prefs = Prefs.shared
         let updateInfo = InterfaceUpdateItems()
 
@@ -323,7 +348,6 @@ final class NetExtra: MenuExtraBase {
 
         // PPP status
         if let ppp = details.pppStatus {
-            pppPresent = true
             let label = details.connectionType.map { "\($0):" } ?? L("PPP:")
             addDisabled(label, indent: 1, to: menu)
 
@@ -362,8 +386,8 @@ final class NetExtra: MenuExtraBase {
             for address in details.ipv6Addresses {
                 addDisabled(address, indent: 3, to: menu)
             }
-        } else if !details.ipv4Addresses.isEmpty {
-            for address in details.ipv4Addresses {
+        } else if !details.ipv4Addresses.isEmpty || !details.ipv6Addresses.isEmpty {
+            for address in details.ipv4Addresses + details.ipv6Addresses {
                 addDisabled(address, indent: 2, to: menu)
             }
         } else {
@@ -389,19 +413,12 @@ final class NetExtra: MenuExtraBase {
 
         // Throughput
         let sampleInterval = netHistoryIntervals.last
-        var throughputInterface: String?
-        var throughputDetails: NetInterfaceStats?
-        if let latest = netHistoryData.last,
-           details.deviceName != nil || details.pppDeviceName != nil {
-            if let pppName = details.pppDeviceName,
-               !(details.deviceName ?? "").hasPrefix("en") {
-                throughputInterface = pppName
-                throughputDetails = latest[pppName]
-            } else if let device = details.deviceName {
-                throughputInterface = device
-                throughputDetails = latest[device]
-            }
+        var throughputInterface = details.deviceName
+        if let pppName = details.pppDeviceName,
+           !(details.deviceName ?? "").hasPrefix("en") {
+            throughputInterface = pppName
         }
+        let throughputDetails = throughputInterface.flatMap { netHistoryData.last?[$0] }
 
         if isActiveInterface, let sampleInterval,
            throughputInterface != nil, let stats = throughputDetails {
@@ -492,21 +509,15 @@ final class NetExtra: MenuExtraBase {
             copy6.target = self
             copy6.representedObject = details.ipv6Addresses
         }
-        if let device = details.deviceName {
+        if let throughputInterface {
             let reset = submenu.addItem(withTitle: L("Reset traffic totals"),
                                         action: #selector(resetTotals(_:)), keyEquivalent: "")
             reset.target = self
-            reset.representedObject = device
+            reset.representedObject = throughputInterface
         }
     }
 
     // MARK: - Menu actions
-
-    @objc private func openNetworkUtil(_ sender: Any?) {
-        AppLauncher.open(bundleID: "com.apple.NetworkUtility",
-                         path: "/System/Library/CoreServices/Applications/Network Utility.app",
-                         name: "Network Utility")
-    }
 
     @objc private func openNetworkPrefs(_ sender: Any?) {
         let legacyURL = URL(fileURLWithPath: "/System/Library/PreferencePanes/Network.prefPane")
@@ -519,12 +530,6 @@ final class NetExtra: MenuExtraBase {
             return
         }
         NSLog("MenuMeterNet unable to launch the Network Preferences.")
-    }
-
-    @objc private func openInternetConnect(_ sender: Any?) {
-        AppLauncher.open(bundleID: "com.apple.InternetConnect",
-                         path: "/Applications/Internet Connect.app",
-                         name: "Internet Connect")
     }
 
     @objc private func resetTotals(_ sender: Any?) {

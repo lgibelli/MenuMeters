@@ -4,6 +4,29 @@
 //
 //  Network interface byte counters with per-interface deltas, peaks and totals.
 //
+//  Copyright (c) 2002-2014 Alex Harper
+//  Copyright (c) 2015-2026 The MenuMeters contributors (see the Git history)
+//
+//  This file is part of MenuMeters.
+//
+//  MenuMeters is free software; you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 2 as
+//  published by the Free Software Foundation.
+//
+//  MenuMeters is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with MenuMeters; if not, see <https://www.gnu.org/licenses/>.
+//
+//  SPDX-License-Identifier: GPL-2.0-only
+//
+//  Changes:
+//  2026-10     gonejack: rewritten in Swift from the Objective-C original.
+//  2026-10-30  Luca Gibelli: PPP links fall back to interface counters when pppconfd is unavailable.
+//
 
 import Foundation
 import Darwin
@@ -40,9 +63,11 @@ final class NetStats {
 
         var newData: [String: NetInterfaceStats] = [:]
         for interface in interfaces {
-            if interface.name.hasPrefix("ppp") {
-                guard let status = ppp.status(forInterfaceName: interface.name),
-                      status.status == NetPPP.running,
+            // PPP links use the pppconfd counters when it can report on them,
+            // and the interface counters like any other link otherwise.
+            if interface.name.hasPrefix("ppp"),
+               let status = ppp.status(forInterfaceName: interface.name) {
+                guard status.status == NetPPP.running,
                       let input = status.inBytes,
                       let output = status.outBytes else { continue }
                 newData[interface.name] = updatedStats(name: interface.name,
