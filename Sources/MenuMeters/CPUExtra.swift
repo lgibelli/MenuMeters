@@ -278,10 +278,15 @@ final class CPUExtra: MenuExtraBase {
     // MARK: - Timer
 
     override func timerFired(_ timer: Timer) {
-        let current = cpuInfo.currentLoad(sorted: Prefs.shared.cpuSortByUsage)
+        let prefs = Prefs.shared
+        // Keep the process list live while the menu is open.
+        if isMenuVisible, prefs.cpuMaxProcessCount > 0 {
+            topProcesses.startUpdateProcessList()
+        }
+
+        let current = cpuInfo.currentLoad(sorted: prefs.cpuSortByUsage)
         guard !current.isEmpty else { return }
 
-        let prefs = Prefs.shared
         if prefs.cpuDisplayMode & CPU.displayGraph != 0 {
             if loadHistory.count >= prefs.cpuGraphLength {
                 loadHistory.removeFirst(loadHistory.count - prefs.cpuGraphLength + 1)
@@ -293,10 +298,6 @@ final class CPUExtra: MenuExtraBase {
 
         if isMenuVisible {
             updateMenuWhenDown()
-            // Keep the process list live while the menu is open.
-            if prefs.cpuMaxProcessCount > 0 {
-                topProcesses.startUpdateProcessList()
-            }
         }
         if prefs.cpuPowerMate, let powerMate {
             updatePowerMate(powerMate)
@@ -536,7 +537,8 @@ final class CPUExtra: MenuExtraBase {
     private func renderHorizontalThermometer(processor: UInt32, x: CGFloat, y: CGFloat,
                                              width: CGFloat, height: CGFloat) {
         let value = load(for: processor, at: -1)
-        guard value.system >= 0, value.user >= 0 else { return }
+        // With too many bars for the width there is no room inside the frame.
+        guard value.system >= 0, value.user >= 0, width > 2 else { return }
 
         let capRect = NSRect(x: x + width - 2, y: y, width: 1, height: height - 1)
         let userRect = NSRect(x: x + 1, y: y, width: (width - 2) * min(1, value.user + value.system),

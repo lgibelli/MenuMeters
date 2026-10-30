@@ -59,6 +59,13 @@ fi
 KEY_ARGS=(--account "$SPARKLE_KEY_ACCOUNT")
 if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ]; then
   KEY_ARGS=(--ed-key-file "$SPARKLE_PRIVATE_KEY_FILE")
+else
+  # generate_appcast only warns about a key that does not match the app's,
+  # and writes an unsigned item that every copy would refuse.
+  PUBLIC_KEY=$("$SPARKLE/bin/generate_keys" --account "$SPARKLE_KEY_ACCOUNT" -p 2>/dev/null || true)
+  [ "$PUBLIC_KEY" = "$(plist_value SUPublicEDKey)" ] || die "the key in keychain account '$SPARKLE_KEY_ACCOUNT' is not the app's SUPublicEDKey.
+       keychain: ${PUBLIC_KEY:-none}
+       app:      $(plist_value SUPublicEDKey)"
 fi
 
 say "Generating and signing the appcast"
@@ -70,6 +77,13 @@ say "Generating and signing the appcast"
   --maximum-deltas 0 \
   -o "$STAGE/appcast.xml" \
   "$STAGE"
+
+# Check what was written: the item must be signed, and must describe the
+# version its download URL and release notes were chosen for.
+grep -q 'sparkle:edSignature=' "$STAGE/appcast.xml" \
+  || die "the appcast item is not signed; check the update key"
+grep -q "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" "$STAGE/appcast.xml" \
+  || die "the app in $DMG is not version $VERSION"
 
 say "Appcast written to $STAGE/appcast.xml"
 echo "   Publish it at ${SITE_URL}appcast.xml"

@@ -275,16 +275,28 @@ final class DiskExtra: MenuExtraBase {
         let verb = ejectable || !isInternal ? "eject" : "unmount"
         let name = FileManager.default.displayName(atPath: path)
 
-        let errorPipe = Pipe()
+        // diskutil explains a failure on either stream, so keep both.
+        let outputPipe = Pipe()
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
         task.arguments = [verb, path]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = errorPipe
-        task.terminationHandler = { [weak self] task in
-            // diskutil reports a failure in a line or two, far below the pipe
-            // buffer, so reading it once the task has exited cannot deadlock.
-            let output = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        task.standardOutput = outputPipe
+        task.standardError = outputPipe
+
+        ejectTasks[path] = task
+        do {
+            try task.run()
+        } catch {
+            ejectTasks[path] = nil
+            Self.reportEjectFailure(verb: verb, name: name, path: path,
+                                    message: error.localizedDescription)
+            return
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            // Reading while diskutil runs keeps a full pipe from blocking it;
+            // the read ends when it exits.
+            let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
             let status = task.terminationStatus
             DispatchQueue.main.async {
                 self?.ejectTasks[path] = nil
@@ -296,15 +308,6 @@ final class DiskExtra: MenuExtraBase {
                 }
                 Self.reportEjectFailure(verb: verb, name: name, path: path, message: message)
             }
-        }
-
-        ejectTasks[path] = task
-        do {
-            try task.run()
-        } catch {
-            ejectTasks[path] = nil
-            Self.reportEjectFailure(verb: verb, name: name, path: path,
-                                    message: error.localizedDescription)
         }
     }
 

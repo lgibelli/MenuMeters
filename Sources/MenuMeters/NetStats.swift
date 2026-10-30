@@ -45,6 +45,9 @@ struct NetInterfaceStats {
 final class NetStats {
     private let ppp = NetPPP.shared
     private var lastData: [String: NetInterfaceStats] = [:]
+    // Whether each interface's last counters came from pppconfd rather than
+    // the interface. The two count from different origins.
+    private var lastFromPPP: [String: Bool] = [:]
 
     private struct InterfaceCounters {
         let name: String
@@ -62,6 +65,7 @@ final class NetStats {
         guard let interfaces = readInterfaces() else { return nil }
 
         var newData: [String: NetInterfaceStats] = [:]
+        var newFromPPP: [String: Bool] = [:]
         for interface in interfaces {
             // PPP links use the pppconfd counters when it can report on them,
             // and the interface counters like any other link otherwise.
@@ -74,17 +78,22 @@ final class NetStats {
                                                        input: input,
                                                        output: output,
                                                        isUp: true,
+                                                       fromPPP: true,
                                                        interval: interval)
+                newFromPPP[interface.name] = true
             } else {
                 newData[interface.name] = updatedStats(name: interface.name,
                                                        input: interface.input,
                                                        output: interface.output,
                                                        isUp: interface.isUp,
+                                                       fromPPP: false,
                                                        interval: interval)
+                newFromPPP[interface.name] = false
             }
         }
 
         lastData = newData
+        lastFromPPP = newFromPPP
         return newData
     }
 
@@ -98,7 +107,8 @@ final class NetStats {
     // MARK: - Counter math
 
     private func updatedStats(name: String, input: UInt32, output: UInt32,
-                              isUp: Bool, interval: TimeInterval) -> NetInterfaceStats {
+                              isUp: Bool, fromPPP: Bool,
+                              interval: TimeInterval) -> NetInterfaceStats {
         guard let old = lastData[name], isUp else {
             return NetInterfaceStats(ifIn: input,
                                      ifOut: output,
@@ -107,6 +117,19 @@ final class NetStats {
                                      totalIn: UInt64(input),
                                      totalOut: UInt64(output),
                                      peak: 0,
+                                     hasDeltas: false)
+        }
+        guard lastFromPPP[name] == fromPPP else {
+            // The counters switched source. Comparing across sources would
+            // look like a wrap and add about 4 GB, so take the new counters
+            // as the baseline and keep the totals.
+            return NetInterfaceStats(ifIn: input,
+                                     ifOut: output,
+                                     deltaIn: 0,
+                                     deltaOut: 0,
+                                     totalIn: old.totalIn,
+                                     totalOut: old.totalOut,
+                                     peak: old.peak,
                                      hasDeltas: false)
         }
 

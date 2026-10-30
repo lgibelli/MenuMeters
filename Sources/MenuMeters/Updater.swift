@@ -97,6 +97,7 @@ final class Updater: NSObject {
 /// update session ends.
 final class UpdateReminders: NSObject, SPUStandardUserDriverDelegate {
     private static let activationReason = "update"
+    private var attentionRequest: Int?
 
     var supportsGentleScheduledUpdateReminders: Bool { true }
 
@@ -107,15 +108,23 @@ final class UpdateReminders: NSObject, SPUStandardUserDriverDelegate {
         // A check the user asked for already has their attention.
         guard !state.userInitiated else { return }
         NSApp.dockTile.badgeLabel = "1"
-        NSApp.requestUserAttention(.informationalRequest)
+        attentionRequest = NSApp.requestUserAttention(.informationalRequest)
     }
 
     func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        NSApp.dockTile.badgeLabel = nil
+        clearAttention()
     }
 
     func standardUserDriverWillFinishUpdateSession() {
-        NSApp.dockTile.badgeLabel = nil
+        clearAttention()
         ActivationPolicy.release(Self.activationReason)
+    }
+
+    private func clearAttention() {
+        NSApp.dockTile.badgeLabel = nil
+        if let attentionRequest {
+            NSApp.cancelUserAttentionRequest(attentionRequest)
+        }
+        attentionRequest = nil
     }
 }

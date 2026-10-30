@@ -74,10 +74,13 @@ final class DiskSpace {
                   cached.f_flags & UInt32(MNT_DONTBROWSE) == 0 else { continue }
 
             // Refresh the cached numbers, for local volumes only. Skip the
-            // volume if it was unmounted since the list was taken.
+            // volume if it was unmounted, or something else mounted there,
+            // since the list was taken.
             let path = cString(cached.f_mntonname)
             var mount = statfs()
-            guard statfs(path, &mount) == 0, cString(mount.f_mntonname) == path else { continue }
+            guard statfs(path, &mount) == 0, cString(mount.f_mntonname) == path,
+                  cString(mount.f_fstypename) == fileSystem,
+                  mount.f_flags & UInt32(MNT_DONTBROWSE) == 0 else { continue }
 
             let url = URL(fileURLWithPath: path, isDirectory: true)
             let volumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName

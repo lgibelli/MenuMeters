@@ -87,6 +87,12 @@ final class NetExtra: MenuExtraBase {
 
     override init(bundleID: String) {
         super.init(bundleID: bundleID)
+        // A configuration change, or a link speed looked up in the
+        // background, also refreshes the menu while it is open.
+        netConfig.onChange = { [weak self] in
+            guard let self, self.isMenuVisible else { return }
+            self.buildMenu()
+        }
         configFromPrefs(nil)
     }
 
@@ -314,7 +320,8 @@ final class NetExtra: MenuExtraBase {
         // Link speed is only shown when we believe the interface is active.
         var speed: String?
         if let linkSpeed = details.linkSpeed, isActiveInterface {
-            if linkSpeed < 0 {
+            // Zero while a background lookup is still running.
+            if linkSpeed <= 0 {
                 speed = nil
             } else if linkSpeed > 1_000_000_000 {
                 speed = String(format: " %.0f %@", linkSpeed / 1_000_000_000, L("Gbps"))

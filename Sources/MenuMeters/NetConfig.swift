@@ -48,6 +48,7 @@ struct NetInterfaceDetails {
     var deviceName: String?
     var pppDeviceName: String?
     var connectionType: String?
+    var isPPPService = false
     var pppStatus: PPPStatusResult?
     var ipv4Addresses: [String] = []
     var ipv6Addresses: [String] = []
@@ -92,6 +93,8 @@ final class NetConfig {
     private var ifconfigSpeeds: [String: Double] = [:]
     private var staleIfconfigSpeeds: Set<String> = []
     private var ifconfigLookupsInFlight: Set<String> = []
+    // Bumped by clearCaches(), to recognize lookups started before a change.
+    private var ifconfigGeneration = 0
 
     init() {
         var context = SCDynamicStoreContext(version: 0,
@@ -168,7 +171,8 @@ final class NetConfig {
     func interfaceDetails() -> [NetInterfaceDetails] {
         if let cached = cachedDetails {
             var refreshed = cached
-            for index in refreshed.indices where refreshed[index].pppStatus != nil {
+            // Includes services whose status could not be read last time.
+            for index in refreshed.indices where refreshed[index].isPPPService {
                 if let status = ppp.status(forServiceID: refreshed[index].serviceID) {
                     refreshed[index].pppStatus = status
                 }
@@ -219,16 +223,17 @@ final class NetConfig {
                 detail.pppDeviceName = pppName
             }
             if sysconfigValue("Setup:/Network/Service/\(serviceID)/PPP") != nil {
+                detail.isPPPService = true
                 detail.pppStatus = ppp.status(forServiceID: serviceID)
             }
 
             if let ipDict = sysconfigValue("State:/Network/Service/\(serviceID)/IPv4") {
                 detail.ipv4Addresses = stringArray(ipDict["Addresses"])
             }
-            if let device = detail.deviceName {
-                if let ipDict = sysconfigValue("State:/Network/Interface/\(device)/IPv6") {
-                    detail.ipv6Addresses = stringArray(ipDict["Addresses"])
-                }
+            // The service's own addresses: the interface's would include its
+            // link-local address, and for PPP those of the transport.
+            if let ipDict = sysconfigValue("State:/Network/Service/\(serviceID)/IPv6") {
+                detail.ipv6Addresses = stringArray(ipDict["Addresses"])
             }
 
             if let device = detail.deviceName,
@@ -375,16 +380,36 @@ final class NetConfig {
                 cachedInterfaceUp[interfaceName] = active
                 return active
             }
-        } else if interfaceName.hasPrefix("ppp"),
-                  let status = ppp.status(forInterfaceName: interfaceName) {
-            let running = status.status == NetPPP.running
-            cachedInterfaceUp[interfaceName] = running
-            return running
+        } else if interfaceName.hasPrefix("ppp") {
+            if let status = ppp.status(forInterfaceName: interfaceName) {
+                let running = status.status == NetPPP.running
+                cachedInterfaceUp[interfaceName] = running
+                return running
+            }
+            // pppconfd cannot report on it: ask the interface, without
+            // caching, so pppconfd is asked again next time.
+            return Self.interfaceIsUpAndRunning(interfaceName)
         }
 
-        // Interfaces without explicit link state, and PPP links pppconfd
-        // cannot report on, are assumed active.
+        // Interfaces without explicit link state are assumed active.
         return true
+    }
+
+    /// IFF_UP and IFF_RUNNING from the interface flags. False when there is no
+    /// such interface.
+    private static func interfaceIsUpAndRunning(_ interfaceName: String) -> Bool {
+        var addressList: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addressList) == 0 else { return false }
+        defer { freeifaddrs(addressList) }
+        var pointer = addressList
+        while let current = pointer {
+            let interface = current.pointee
+            pointer = interface.ifa_next
+            guard String(cString: interface.ifa_name) == interfaceName else { continue }
+            let wanted = UInt32(IFF_UP | IFF_RUNNING)
+            return interface.ifa_flags & wanted == wanted
+        }
+        return false
     }
 
     // MARK: - Link speed
@@ -433,18 +458,27 @@ final class NetConfig {
         guard Self.isPlainInterfaceName(interfaceName),
               !ifconfigLookupsInFlight.contains(interfaceName) else { return }
         ifconfigLookupsInFlight.insert(interfaceName)
+        let generation = ifconfigGeneration
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let speed = Self.ifconfigLinkSpeed(interfaceName)
             DispatchQueue.main.async {
-                self?.ifconfigLookupFinished(interfaceName, speed: speed)
+                self?.ifconfigLookupFinished(interfaceName, speed: speed, generation: generation)
             }
         }
     }
 
-    private func ifconfigLookupFinished(_ interfaceName: String, speed: Double) {
+    private func ifconfigLookupFinished(_ interfaceName: String, speed: Double, generation: Int) {
         ifconfigLookupsInFlight.remove(interfaceName)
-        staleIfconfigSpeeds.remove(interfaceName)
-        guard (ifconfigSpeeds.updateValue(speed, forKey: interfaceName) ?? 0) != speed else { return }
+        // A lookup started before the configuration changed is served for
+        // now, but stays stale so the next access looks again.
+        let current = generation == ifconfigGeneration
+        if current {
+            staleIfconfigSpeeds.remove(interfaceName)
+        } else {
+            staleIfconfigSpeeds.insert(interfaceName)
+        }
+        let changed = (ifconfigSpeeds.updateValue(speed, forKey: interfaceName) ?? 0) != speed
+        guard changed || !current else { return }
         // Drop the caches derived from link speed and let the owner refresh.
         cachedDetails = nil
         cachedServiceSpeed.removeAll()
@@ -567,6 +601,7 @@ final class NetConfig {
         cachedServiceSpeed.removeAll()
         cachedUnderlying.removeAll()
         cachedInterfaceUp.removeAll()
+        ifconfigGeneration += 1
         staleIfconfigSpeeds = Set(ifconfigSpeeds.keys)
     }
 }

@@ -169,16 +169,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func killOlderInstances() {
-        for other in otherInstances() {
+        // A newer copy may have started since newerInstanceIsRunning() looked.
+        for other in otherInstances()
+        where Version.compare(other.version, Self.bundleVersion) != .orderedDescending {
             NSLog("MenuMeters: terminating instance \(other.version), ours is \(Self.bundleVersion)")
             other.app.terminate()
         }
         // Builds from before the bundle identifier changed are always older,
-        // and would show every meter a second time.
+        // and would show every meter a second time. They only look for their
+        // own identifier, so also quit one that starts later, such as from
+        // its login item.
         for legacy in NSRunningApplication.runningApplications(withBundleIdentifier: MM.legacyAppBundleID) {
-            NSLog("MenuMeters: terminating the copy with the old bundle identifier")
-            legacy.terminate()
+            terminateLegacyCopy(legacy)
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(applicationDidLaunch(_:)),
+            name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+    }
+
+    @objc private func applicationDidLaunch(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.bundleIdentifier == MM.legacyAppBundleID else { return }
+        terminateLegacyCopy(app)
+    }
+
+    private func terminateLegacyCopy(_ app: NSRunningApplication) {
+        NSLog("MenuMeters: terminating the copy with the old bundle identifier")
+        app.terminate()
     }
 
     private func isRunningOnReadOnlyVolume() -> Bool {

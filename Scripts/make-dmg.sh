@@ -39,12 +39,12 @@ if [ "$IDENTITY" != "-" ]; then
     say "Signing the DMG"
     codesign --force --sign "$IDENTITY" --timestamp "$DMG"
 
-    if have_api_key || [ -n "$NOTARY_PROFILE" ]; then
-        say "Notarizing the DMG"
-        notary_submit "$DMG"
-        xcrun stapler staple "$DMG"
-        xcrun stapler validate "$DMG"
-    fi
+    # A signed DMG is a release DMG, and a release is notarized.
+    require_notary_credentials
+    say "Notarizing the DMG"
+    notary_submit "$DMG"
+    xcrun stapler staple "$DMG"
+    xcrun stapler validate "$DMG"
 else
     printf "\n\033[1;33mNOTE:\033[0m ad hoc build — the DMG is unsigned and will warn on other Macs.\n"
 fi
@@ -54,7 +54,9 @@ fi
 say "Verifying the image as a recipient receives it"
 MNT=$(mktemp -d)
 hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
-spctl -a -vvv -t execute "$MNT/$APP_NAME.app" 2>&1 | head -3 | sed 's/^/  /'
+# spctl rejects an ad hoc app; report that and go on, so the image is still
+# detached below.
+spctl -a -vvv -t execute "$MNT/$APP_NAME.app" 2>&1 | head -3 | sed 's/^/  /' || true
 if xcrun stapler validate "$MNT/$APP_NAME.app" >/dev/null 2>&1; then
     echo "  stapled ticket valid — opens offline, no Gatekeeper warning"
 else

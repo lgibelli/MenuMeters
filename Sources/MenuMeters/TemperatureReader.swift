@@ -47,23 +47,25 @@ enum TemperatureReader {
     }
 
     static func defaultSensor() -> String? {
-        resolvedDefaultSensor
-    }
-
-    // Depends only on the hardware, so resolve it once rather than enumerating
-    // every sensor on each redraw.
-    private static let resolvedDefaultSensor: String? = {
+        if let resolvedDefaultSensor { return resolvedDefaultSensor }
         let candidate: String
 #if arch(x86_64)
         candidate = "TC0P"
 #else
         candidate = "SOC MTR Temp Sensor0"
 #endif
+        // Not cached: the sensors may become readable later.
         guard let names = sensorNames(), !names.isEmpty else { return candidate }
-        if names.contains(candidate) { return candidate }
-        if let tc = names.first(where: { $0.hasPrefix("TC") }) { return tc }
-        return names.first
-    }()
+        let sensor = names.contains(candidate)
+            ? candidate
+            : names.first(where: { $0.hasPrefix("TC") }) ?? names.first
+        resolvedDefaultSensor = sensor
+        return sensor
+    }
+
+    // Depends only on the hardware, so it is resolved from the first
+    // successful enumeration rather than by enumerating on each redraw.
+    private static var resolvedDefaultSensor: String?
 
     static func displayName(for sensor: String) -> String {
 #if arch(x86_64)

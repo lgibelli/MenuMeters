@@ -166,6 +166,11 @@ final class MemExtra: MenuExtraBase {
     // MARK: - Preferences
 
     override func configFromPrefs(_ notification: Notification?) {
+        if statusItem == nil && Prefs.shared.meterEnabled(bundleID) {
+            // Sampling (re)starts below: move the paging baselines here so the
+            // first sample does not span the time the meter was off.
+            _ = memory.memStats()
+        }
         configDisplay(interval: Prefs.shared.memInterval)
         setupColor()
 

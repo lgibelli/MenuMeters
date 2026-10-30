@@ -116,8 +116,10 @@ SHA-256; the Xcode project gets the same version as a Swift package.
 Ad hoc builds carry one entitlement,
 `com.apple.security.cs.disable-library-validation`
 (`Resources/MenuMeters-adhoc.entitlements`). Without a team identifier,
-library validation would refuse to load Sparkle. Developer ID builds have no
-entitlements, and library validation applies in full.
+library validation would refuse to load Sparkle. Developer ID builds, which
+only `build-clt.sh` makes, have no entitlements, and library validation applies
+in full. The Xcode project is for development: it always signs ad hoc, so it
+always carries the entitlement, and it is not used for releases.
 
 The Xcode project contains the same sources and resources and uses resource
 variant groups for the localized string tables. The shared `MenuMeters` scheme
